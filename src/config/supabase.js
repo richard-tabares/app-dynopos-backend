@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
-const supabaseUrl = procces.enve.SUPABASE_URL
-const supabaseAnonKey = procces.enve.SUPABASE_ANON_KEY
+import dotenv from 'dotenv'
 
-// Create a single supabase client for interacting with your database
-const supabase = createClient(supabaseUrl, supabaseAnonKey)
+dotenv.config()
+
+const supabaseUrl = process.env.SUPABASE_URL
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
