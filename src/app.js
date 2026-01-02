@@ -3,6 +3,7 @@ import cors from 'cors'
 import productsRoutes from './routes/productsRoutes.js'
 import categoriesRoutes from './routes/categoriesRoutes.js'
 import authRoutes from './routes/authRoutes.js'
+import businessesRoutes from './routes/businessesRoutes.js'
 
 const app = express()
 
@@ -12,5 +13,6 @@ app.use(express.json())
 app.use('/api/products', productsRoutes)
 app.use('/api/categories', categoriesRoutes)
 app.use('/api/auth', authRoutes)
+app.use('/api/businesses', businessesRoutes)
 
 export default app
