@@ -1,23 +1,28 @@
 import { supabase } from '../config/supabase.js'
 
 export const createSale = async (req, res) => {
-	const { business_id, user_id, payment_method, status, salesItems } =
-		req.body
+	const { business_id, user_id, payment_method, status, salesItems } = req.body
 
-	try {
+    try {
+        
+        if (!salesItems ||salesItems.length === 0) {
+            return res.status(400).json({ error: 'No se proporcionaron items de venta' })
+        }
+
 		//Obtener ids de productos vendidos
 		const productIds = salesItems.map((item) => item.product_id)
 		// Obtener precios de productos segun los ids
 		const { data: products, error: productsError } = await supabase
 			.from('products')
-			.select('id, price')
+			.select('id, price, stock')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
+
 		//calculamos totales
 		let total_amount = 0
 		const itemsWithPrices = salesItems.map((item) => {
-			const product = products.find(p => p.id === item.product_id)
+			const product = products.find((p) => p.id === item.product_id)
 			const subtotal = product.price * item.quantity
 			total_amount += subtotal
 
@@ -57,6 +62,30 @@ export const createSale = async (req, res) => {
 			.select()
 
 		if (itemsError) throw new Error(itemsError)
+
+		//Reducir stock de productos vendidos
+		for (const item of itemsWithPrices) {
+			//Consultar stock actual
+			// const { data: product, error: stockError } = await supabase
+			// 	.from('products')
+			// 	.select('stock')
+			// 	.eq('id', item.product_id)
+			// 	.single()
+
+			// if (stockError) throw new Error(stockError)
+
+            const product = products.find((p) => p.id === item.product_id)
+			//Calcular nuevo stock
+			const newStock = product.stock - item.quantity
+
+			//Actualizar stock
+			const { error: updateStockError } = await supabase
+				.from('products')
+				.update({ stock: newStock })
+                .eq('id', item.product_id)
+            
+			if (updateStockError) throw new Error(updateStockError)
+		}
 
 		res.status(201).json({ status: 201, message: 'Venta Creada', data })
 	} catch (error) {
