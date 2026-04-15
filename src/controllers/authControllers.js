@@ -10,8 +10,8 @@ export const login = async (req, res) => {
         const { data: profileData, error: profileError } = await supabase
             .from('profiles')
             .select('*')
-            .eq('id', data.user.id)
-			.single()
+            .eq('user_id', data.user.id)
+            .single()
         if (profileError) throw new Error(profileError)
         if (error) throw new Error(error)
         return res.json({
@@ -26,22 +26,28 @@ export const login = async (req, res) => {
 }
 
 export const signup = async (req, res) => {
-    const { email, password } = req.body
+    const { business_name, owner_name, email, password, phone } = req.body
 
     try {
         const { data, error } = await supabase.auth.signUp({
             email: email,
             password: password,
         })
-		await supabase
-			.from('profiles')
-			.insert({
-            id: data.user.id,
+		if (error) throw new Error(error.message)
+        const { error: profileError } = await supabase.from('profiles').insert({
+            user_id: data.user.id,
             display_name: 'Richard Tabares',
             role: 'admin',
-            business_id: 1,
+		})
+		if (profileError) throw new Error(profileError.message)
+        const { error: businessError } = await supabase.from('businesses').insert({
+            user_id: data.user.id,
+            business_name: business_name,
+            owner_name: owner_name,
+            email: email,
+            phone: phone,
         })
-        if (error) throw new Error(error)
+		if (businessError) throw new Error(businessError.message)
         return res.json({
             status: 201,
             message: 'Usuario creado exitosamente',
