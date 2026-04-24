@@ -1,7 +1,7 @@
 import { supabase } from '../config/supabase.js'
 
 export const createSale = async (req, res) => {
-	const { business_id, user_id, payment_method, status, salesItems } =
+	const { business_id, payment_method, status, salesItems } =
 		req.body
 
 	try {
@@ -13,10 +13,10 @@ export const createSale = async (req, res) => {
 
 		//Obtener ids de productos vendidos
 		const productIds = salesItems.map((item) => item.product_id)
-		// Obtener precios de productos segun los ids
+		// Obtener precios de productos e inventario segun los ids
 		const { data: products, error: productsError } = await supabase
 			.from('products')
-			.select('id, name, price, stock')
+			.select('id, name, price, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
@@ -29,9 +29,10 @@ export const createSale = async (req, res) => {
 					error: `Producto con ID ${item.product_id} no encontrado`,
 				})
 			}
-			if (item.quantity > product.stock) {
+			const currentStock = product.inventory?.[0]?.stock || 0
+			if (item.quantity > currentStock) {
 				return res.status(400).json({
-					error: `El producto ${product.name} no tiene stock suficiente, stock actual es ${product.stock}`,
+					error: `El producto ${product.name} no tiene stock suficiente, stock actual es ${currentStock}`,
 				})
 			}
 		}
@@ -56,7 +57,6 @@ export const createSale = async (req, res) => {
 			.insert([
 				{
 					business_id,
-					user_id,
 					payment_method,
 					status,
 					total_amount,
@@ -84,13 +84,14 @@ export const createSale = async (req, res) => {
 		for (const item of itemsWithPrices) {
 			const product = products.find((p) => p.id === item.product_id)
 			//Calcular nuevo stock
-			const newStock = product.stock - item.quantity
+			const currentStock = product.inventory?.[0]?.stock || 0
+			const newStock = currentStock - item.quantity
 
-			//Actualizar stock
+			//Actualizar stock en tabla inventory
 			const { error: updateStockError } = await supabase
-				.from('products')
+				.from('inventory')
 				.update({ stock: newStock })
-				.eq('id', item.product_id)
+				.eq('product_id', item.product_id)
 
 			if (updateStockError) throw new Error(updateStockError)
 		}
@@ -122,22 +123,23 @@ export const returnSale = async (req, res) => {
 
 		//restaurar stock de productos
 		for (const item of sale.salesItems) {
-			//obtener producto
+			//obtener producto con su inventario
 			const { data: product, error: productError } = await supabase
 				.from('products')
-				.select('stock')
+				.select('id, inventory(stock)')
 				.eq('id', item.product_id)
 				.single()
 
 			if (productError) throw new Error(productError)
 
 			//calcular nuevo stock
-			const newStock = product.stock + item.quantity
-			//actualizar stock
+			const currentStock = product.inventory?.[0]?.stock || 0
+			const newStock = currentStock + item.quantity
+			//actualizar stock en tabla inventory
 			const { error: updateStockError } = await supabase
-				.from('products')
+				.from('inventory')
 				.update({ stock: newStock })
-				.eq('id', item.product_id)
+				.eq('product_id', item.product_id)
 
 			if (updateStockError) throw new Error(updateStockError)
 		}
