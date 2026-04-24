@@ -3,7 +3,7 @@ import { getCategories, createCategory, updateCategory, deleteCategory } from '.
 
 const router = Router()
 
-router.get('/', getCategories)
+router.get('/:businessId', getCategories)
 router.post('/', createCategory)
 router.patch('/:id', updateCategory)
 router.delete('/:id', deleteCategory)

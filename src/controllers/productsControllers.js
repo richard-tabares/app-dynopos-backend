@@ -65,10 +65,20 @@ export const updateProduct = async (req, res) => {
         .from('products')
         .update(req.body)
         .eq('id', ProductId)
-        .select()
+        .select(
+            `id,
+            name,
+            sku,
+            price,
+            is_active,
+            categories (
+                id,
+                name
+            )`
+        )
 
     if (error) return res.status(500).json(error)
-    res.json({ status: 200, message: 'Producto Actualizado', data })
+    res.json({ status: 200, message: 'Producto Actualizado', data: data[0] })
 }
 export const deleteProduct = async (req, res) => {
     const { ProductId } = req.params
