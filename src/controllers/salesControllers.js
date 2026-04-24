@@ -12,7 +12,7 @@ export const getSales = async (req, res) => {
 				created_at,
 				payment_method,
 				status,
-				salesItems(quantity, unit_price, subtotal, products(name))
+				salesItems(id, product_id, quantity, unit_price, subtotal, products(name))
 			`)
 			.eq('business_id', businessId)
 			.order('id', { ascending: false })
@@ -27,6 +27,8 @@ export const getSales = async (req, res) => {
 			paymentMethod: s.payment_method,
 			status: s.status,
 			items: s.salesItems.map(item => ({
+				id: item.id,
+				product_id: item.product_id,
 				quantity: item.quantity,
 				price: item.unit_price,
 				subtotal: item.subtotal,
@@ -157,41 +159,52 @@ export const createSale = async (req, res) => {
 
 export const returnSale = async (req, res) => {
 	const { id } = req.params
-	const { reason, business_id } = req.body
+	const { reason, business_id, items } = req.body
 
 	try {
+		if (!items || items.length === 0) {
+			return res.status(400).json({ error: 'Debe seleccionar al menos un producto para devolver' })
+		}
+
 		const { data: sale, error: saleError } = await supabase
 			.from('salesTickets')
-			.select('id, total_amount, status, business_id, salesItems(product_id, quantity, unit_price, subtotal)')
+			.select('id, total_amount, status, business_id')
 			.eq('id', id)
 			.single()
 
 		if (saleError) throw new Error(saleError)
 
 		if (sale.status === 'returned') {
-			return res
-				.status(400)
-				.json({ error: 'La venta ya ha sido devuelta' })
+			return res.status(400).json({ error: 'La venta ya ha sido devuelta' })
 		}
 
-		for (const item of sale.salesItems) {
-			const { data: product, error: productError } = await supabase
-				.from('products')
-				.select('id, inventory(stock)')
-				.eq('id', item.product_id)
-				.single()
+		const productIds = items.map(item => item.product_id)
+		const { data: products, error: productsError } = await supabase
+			.from('products')
+			.select('id, inventory(stock)')
+			.in('id', productIds)
 
-			if (productError) throw new Error(productError)
+		if (productsError) throw new Error(productsError)
+
+		let totalReturnAmount = 0
+
+		for (const returnItem of items) {
+			const product = products.find(p => p.id === returnItem.product_id)
+			if (!product) {
+				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado` })
+			}
 
 			const currentStock = product.inventory?.[0]?.stock || 0
-			const newStock = currentStock + item.quantity
+			const newStock = currentStock + returnItem.quantity
 
 			const { error: updateStockError } = await supabase
 				.from('inventory')
 				.update({ stock: newStock })
-				.eq('product_id', item.product_id)
+				.eq('product_id', returnItem.product_id)
 
 			if (updateStockError) throw new Error(updateStockError)
+
+			totalReturnAmount += returnItem.subtotal
 		}
 
 		const { data: returnRecord, error: returnError } = await supabase
@@ -200,14 +213,14 @@ export const returnSale = async (req, res) => {
 				sale_id: sale.id,
 				business_id: business_id || sale.business_id,
 				reason,
-				total_amount: sale.total_amount
+				total_amount: totalReturnAmount
 			})
 			.select()
 			.single()
 
 		if (returnError) throw new Error(returnError)
 
-		const returnItems = sale.salesItems.map(item => ({
+		const returnItems = items.map(item => ({
 			return_id: returnRecord.id,
 			product_id: item.product_id,
 			quantity: item.quantity,
@@ -221,20 +234,43 @@ export const returnSale = async (req, res) => {
 
 		if (returnItemsError) throw new Error(returnItemsError)
 
-		const { data: updatedSale, error: updateSaleError } = await supabase
-			.from('salesTickets')
-			.update({ status: 'returned' })
-			.eq('id', id)
-			.select()
-			.single()
+		// Check if all original items were returned
+		const { data: originalItems, error: originalError } = await supabase
+			.from('salesItems')
+			.select('product_id, quantity')
+			.eq('sale_id', id)
 
-		if (updateSaleError) throw new Error(updateSaleError)
+		if (originalError) throw new Error(originalError)
+
+		const allReturned = originalItems.every(orig => {
+			const returned = items.find(r => r.product_id === orig.product_id)
+			return returned && returned.quantity >= orig.quantity
+		})
+
+		if (allReturned) {
+			const { data: updatedSale, error: updateSaleError } = await supabase
+				.from('salesTickets')
+				.update({ status: 'returned' })
+				.eq('id', id)
+				.select()
+				.single()
+
+			if (updateSaleError) throw new Error(updateSaleError)
+
+			return res.status(201).json({
+				status: 201,
+				message: 'Devolución realizada',
+				sale: updatedSale,
+				returnRecord,
+				fullyReturned: true
+			})
+		}
 
 		res.status(201).json({
 			status: 201,
-			message: 'Devolución realizada',
-			sale: updatedSale,
-			returnRecord
+			message: 'Devolución parcial realizada',
+			returnRecord,
+			fullyReturned: false
 		})
 	} catch (error) {
 		res.status(500).json({ error: error.message })
