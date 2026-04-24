@@ -1,5 +1,46 @@
 import { supabase } from '../config/supabase.js'
 
+export const getSales = async (req, res) => {
+	const { businessId } = req.params
+
+	try {
+		const { data: sales, error } = await supabase
+			.from('salesTickets')
+			.select(`
+				id,
+				total_amount,
+				created_at,
+				payment_method,
+				status,
+				salesItems(quantity, unit_price, subtotal, products(name))
+			`)
+			.eq('business_id', businessId)
+			.order('id', { ascending: false })
+			.limit(50)
+
+		if (error) throw new Error(error)
+
+		const formatted = sales.map(s => ({
+			id: s.id,
+			total: s.total_amount,
+			date: s.created_at,
+			paymentMethod: s.payment_method,
+			status: s.status,
+			items: s.salesItems.map(item => ({
+				quantity: item.quantity,
+				price: item.unit_price,
+				subtotal: item.subtotal,
+				name: item.products?.name || 'Producto eliminado'
+			})),
+			itemsCount: s.salesItems.reduce((acc, i) => acc + i.quantity, 0)
+		}))
+
+		res.json(formatted)
+	} catch (error) {
+		res.status(500).json({ error: error.message })
+	}
+}
+
 export const createSale = async (req, res) => {
 	const { business_id, payment_method, status, salesItems } =
 		req.body
@@ -116,12 +157,12 @@ export const createSale = async (req, res) => {
 
 export const returnSale = async (req, res) => {
 	const { id } = req.params
+	const { reason, business_id } = req.body
 
 	try {
-		//obtenemos la venta con sus items
 		const { data: sale, error: saleError } = await supabase
 			.from('salesTickets')
-			.select('id, status, salesItems(product_id, quantity)')
+			.select('id, total_amount, status, business_id, salesItems(product_id, quantity, unit_price, subtotal)')
 			.eq('id', id)
 			.single()
 
@@ -133,9 +174,7 @@ export const returnSale = async (req, res) => {
 				.json({ error: 'La venta ya ha sido devuelta' })
 		}
 
-		//restaurar stock de productos
 		for (const item of sale.salesItems) {
-			//obtener producto con su inventario
 			const { data: product, error: productError } = await supabase
 				.from('products')
 				.select('id, inventory(stock)')
@@ -144,10 +183,9 @@ export const returnSale = async (req, res) => {
 
 			if (productError) throw new Error(productError)
 
-			//calcular nuevo stock
 			const currentStock = product.inventory?.[0]?.stock || 0
 			const newStock = currentStock + item.quantity
-			//actualizar stock en tabla inventory
+
 			const { error: updateStockError } = await supabase
 				.from('inventory')
 				.update({ stock: newStock })
@@ -156,7 +194,33 @@ export const returnSale = async (req, res) => {
 			if (updateStockError) throw new Error(updateStockError)
 		}
 
-		//actualizar estado de la venta a 'returned'
+		const { data: returnRecord, error: returnError } = await supabase
+			.from('returns')
+			.insert({
+				sale_id: sale.id,
+				business_id: business_id || sale.business_id,
+				reason,
+				total_amount: sale.total_amount
+			})
+			.select()
+			.single()
+
+		if (returnError) throw new Error(returnError)
+
+		const returnItems = sale.salesItems.map(item => ({
+			return_id: returnRecord.id,
+			product_id: item.product_id,
+			quantity: item.quantity,
+			unit_price: item.unit_price,
+			subtotal: item.subtotal
+		}))
+
+		const { error: returnItemsError } = await supabase
+			.from('returns_items')
+			.insert(returnItems)
+
+		if (returnItemsError) throw new Error(returnItemsError)
+
 		const { data: updatedSale, error: updateSaleError } = await supabase
 			.from('salesTickets')
 			.update({ status: 'returned' })
@@ -166,7 +230,12 @@ export const returnSale = async (req, res) => {
 
 		if (updateSaleError) throw new Error(updateSaleError)
 
-		res.status(201).json({status: 201, message: 'Devolución realizada', sale: updatedSale})
+		res.status(201).json({
+			status: 201,
+			message: 'Devolución realizada',
+			sale: updatedSale,
+			returnRecord
+		})
 	} catch (error) {
 		res.status(500).json({ error: error.message })
 	}
