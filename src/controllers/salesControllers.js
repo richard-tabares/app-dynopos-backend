@@ -96,7 +96,19 @@ export const createSale = async (req, res) => {
 			if (updateStockError) throw new Error(updateStockError)
 		}
 
-		res.status(201).json({ status: 201, message: 'Venta Creada', data })
+		res.status(201).json({ 
+			status: 201, 
+			message: 'Venta Creada', 
+			data: {
+				...data,
+				salesItems: itemsData.map((item, index) => ({
+					...item,
+					products: {
+						name: products.find(p => p.id === item.product_id)?.name || 'Producto'
+					}
+				}))
+			} 
+		})
 	} catch (error) {
 		res.status(500).json({ error: error.message })
 	}
