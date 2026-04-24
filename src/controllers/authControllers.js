@@ -13,12 +13,22 @@ export const login = async (req, res) => {
             .eq('user_id', data.user.id)
             .single()
         if (profileError) throw new Error(profileError)
+
+        const { data: businessData, error: businessError } = await supabase
+            .from('businesses')
+            .select('business_name, business_logo') // Assuming business_logo column exists
+            .eq('user_id', data.user.id)
+            .single()
+
+        if (businessError) throw new Error(businessError)
+
         if (error) throw new Error(error)
         return res.json({
             status: 200,
             message: 'Login exitoso',
             data,
             profile: profileData,
+            business: businessData,
         })
     } catch (error) {
         return res.status(500).json({ error: error.message })
