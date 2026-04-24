@@ -5,6 +5,7 @@ export const getProducts = async (req, res) => {
         .from('products')
         .select(
             `id,
+            business_id,
             name,
             sku,
             price,
@@ -12,6 +13,10 @@ export const getProducts = async (req, res) => {
             categories (
                 id,
                 name
+            ),
+            inventory (
+                stock,
+                min_stock
             )`
         )
         .eq('business_id', req.params.businessId)
@@ -24,6 +29,7 @@ export const getProductById = async (req, res) => {
         .from('products')
         .select(
             `id,
+            business_id,
             name,
             sku,
             price,
@@ -31,6 +37,10 @@ export const getProductById = async (req, res) => {
             categories (
                 id,
                 name
+            ),
+            inventory (
+                stock,
+                min_stock
             )`
         )
         .eq('id', req.params.ProductId)
@@ -46,6 +56,7 @@ export const createProduct = async (req, res) => {
         .insert(req.body)
         .select(
             `id,
+            business_id,
             name,
             sku,
             price,
@@ -53,6 +64,10 @@ export const createProduct = async (req, res) => {
             categories (
                 id,
                 name
+            ),
+            inventory (
+                stock,
+                min_stock
             )`
         )
 
@@ -67,6 +82,7 @@ export const updateProduct = async (req, res) => {
         .eq('id', ProductId)
         .select(
             `id,
+            business_id,
             name,
             sku,
             price,
@@ -74,6 +90,10 @@ export const updateProduct = async (req, res) => {
             categories (
                 id,
                 name
+            ),
+            inventory (
+                stock,
+                min_stock
             )`
         )
 
