@@ -19,7 +19,7 @@ export const updateBusiness = async (req, res) => {
         const { data, error } = await supabase
             .from('businesses')
             .update(req.body)
-            .eq('id', id)
+            .eq('user_id', id)
             .select()
         if (error) throw new Error(error)
         res.json({ status: 200, message: 'Negocio Actualizado', data })
@@ -34,7 +34,7 @@ export const deleteBusiness = async (req, res) => {
         const { data, error } = await supabase
             .from('businesses')
             .delete()
-            .eq('id', id)
+            .eq('user_id', id)
             .select()
         if (error) throw new Error(error)
         res.json({ status: 200, message: 'Negocio Eliminado', data })
@@ -49,7 +49,7 @@ export const getBusiness = async (req, res) => {
         const { data, error } = await supabase
             .from('businesses')
             .select()
-            .eq('id', id)
+            .eq('user_id', id)
         if (error) throw new Error(error)
         res.json({ status: 200, message: 'Negocio Obtenido', data })
     } catch (error) {
@@ -101,7 +101,7 @@ export const uploadBusinessLogo = async (req, res) => {
         const { data: updated, error: updateError } = await supabase
             .from('businesses')
             .update({ business_logo: publicUrl })
-            .eq('id', id)
+            .eq('user_id', id)
             .select()
         if (updateError) throw new Error(updateError)
 

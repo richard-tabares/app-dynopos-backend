@@ -7,22 +7,25 @@ export const login = async (req, res) => {
             email: email,
             password: password,
         })
+
+        if (error) throw new Error(error.message)
+        if (!data.user) throw new Error('Credenciales incorrectas')
+
         const { data: profileData, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('user_id', data.user.id)
             .single()
-        if (profileError) throw new Error(profileError)
+        if (profileError) throw new Error(profileError.message)
 
         const { data: businessData, error: businessError } = await supabase
             .from('businesses')
-            .select('id, business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications')
+            .select('business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications, user_id')
             .eq('user_id', data.user.id)
             .single()
 
-        if (businessError) throw new Error(businessError)
+        if (businessError) throw new Error(businessError.message)
 
-        if (error) throw new Error(error)
         return res.json({
             status: 200,
             message: 'Login exitoso',
@@ -43,13 +46,19 @@ export const signup = async (req, res) => {
             email: email,
             password: password,
         })
-		if (error) throw new Error(error.message)
+        if (error) throw new Error(error.message)
+
+        if (!data.user) {
+            throw new Error('El usuario no se pudo crear. Revisa que el correo no esté registrado.')
+        }
+
         const { error: profileError } = await supabase.from('profiles').insert({
             user_id: data.user.id,
             display_name: 'Richard Tabares',
             role: 'admin',
-		})
-		if (profileError) throw new Error(profileError.message)
+        })
+        if (profileError) throw new Error(profileError.message)
+
         const { error: businessError } = await supabase.from('businesses').insert({
             user_id: data.user.id,
             business_name: business_name,
@@ -57,7 +66,8 @@ export const signup = async (req, res) => {
             email: email,
             phone: phone,
         })
-		if (businessError) throw new Error(businessError.message)
+        if (businessError) throw new Error(businessError.message)
+
         return res.json({
             status: 201,
             message: 'Usuario creado exitosamente',

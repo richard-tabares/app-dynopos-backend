@@ -21,4 +21,10 @@ app.use('/api/sales', salesRoutes)
 app.use('/api/inventory', inventoryRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err)
+    res.status(500).json({ error: err.message || 'Error interno del servidor' })
+})
+
 export default app
