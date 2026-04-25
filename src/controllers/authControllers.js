@@ -16,7 +16,7 @@ export const login = async (req, res) => {
 
         const { data: businessData, error: businessError } = await supabase
             .from('businesses')
-            .select('business_name, business_logo') // Assuming business_logo column exists
+            .select('id, business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications')
             .eq('user_id', data.user.id)
             .single()
 
