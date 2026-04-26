@@ -54,19 +54,27 @@ export const signup = async (req, res) => {
 
         const { error: profileError } = await supabase.from('profiles').insert({
             user_id: data.user.id,
-            display_name: 'Richard Tabares',
+            display_name: '',
             role: 'admin',
         })
         if (profileError) throw new Error(profileError.message)
 
-        const { error: businessError } = await supabase.from('businesses').insert({
-            user_id: data.user.id,
-            business_name: business_name,
-            owner_name: owner_name,
-            email: email,
-            phone: phone,
-        })
+        const { error: businessError } = await supabase
+            .from('businesses')
+            .insert({
+                user_id: data.user.id,
+                business_name: business_name,
+                owner_name: owner_name,
+                email: email,
+                phone: phone,
+            })
         if (businessError) throw new Error(businessError.message)
+
+        const { error: categoryError } = await supabase.from('categories').insert({
+            business_id: data.user.id,
+            name: 'General',
+        })
+        if (categoryError) throw new Error(categoryError.message)
 
         return res.json({
             status: 201,
