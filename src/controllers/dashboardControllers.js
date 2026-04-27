@@ -2,9 +2,8 @@ import { supabase } from '../config/supabase.js'
 
 export const getDashboardMetrics = async (req, res) => {
     const { businessId } = req.params
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const todayISO = today.toISOString()
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
     try {
         // 1. Metrics: Today's Sales & Revenue
@@ -12,7 +11,7 @@ export const getDashboardMetrics = async (req, res) => {
             .from('salesTickets')
             .select('total_amount')
             .eq('business_id', businessId)
-            .gte('created_at', todayISO)
+            .eq('created_at', todayStr)
             .neq('status', 'returned')
 
         if (todaySalesError) throw todaySalesError
@@ -47,13 +46,13 @@ export const getDashboardMetrics = async (req, res) => {
         // 4. Weekly Sales (Last 7 days)
         const sevenDaysAgo = new Date()
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-        sevenDaysAgo.setHours(0, 0, 0, 0)
+        const sevenDaysAgoStr = `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`
 
         const { data: weeklySalesData, error: weeklyError } = await supabase
             .from('salesTickets')
             .select('total_amount, created_at')
             .eq('business_id', businessId)
-            .gte('created_at', sevenDaysAgo.toISOString())
+            .gte('created_at', sevenDaysAgoStr)
             .neq('status', 'returned')
             .order('created_at', { ascending: true })
 

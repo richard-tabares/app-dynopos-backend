@@ -95,6 +95,9 @@ export const createSale = async (req, res) => {
 		})
 
 		//crear venta con totales calculados
+		const now = new Date()
+		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
 		const { data, error: salesError } = await supabase
 			.from('salesTickets')
 			.insert([
@@ -103,6 +106,7 @@ export const createSale = async (req, res) => {
 					payment_method,
 					status,
 					total_amount,
+					created_at: localDate,
 				},
 			])
 			.select()
@@ -113,6 +117,7 @@ export const createSale = async (req, res) => {
 		const itemsToInsert = itemsWithPrices.map((item) => ({
 			...item,
 			sale_id: data.id,
+			created_at: localDate
 		}))
 
 		//Insertar items de venta
@@ -160,6 +165,9 @@ export const createSale = async (req, res) => {
 export const returnSale = async (req, res) => {
 	const { id } = req.params
 	const { reason, business_id, items } = req.body
+
+	const now = new Date()
+	const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
 	try {
 		if (!items || items.length === 0) {
@@ -213,7 +221,8 @@ export const returnSale = async (req, res) => {
 				sale_id: sale.id,
 				business_id: business_id || sale.business_id,
 				reason,
-				total_amount: totalReturnAmount
+				total_amount: totalReturnAmount,
+				created_at: localDate
 			})
 			.select()
 			.single()
@@ -225,7 +234,8 @@ export const returnSale = async (req, res) => {
 			product_id: item.product_id,
 			quantity: item.quantity,
 			unit_price: item.unit_price,
-			subtotal: item.subtotal
+			subtotal: item.subtotal,
+			created_at: localDate
 		}))
 
 		const { error: returnItemsError } = await supabase
