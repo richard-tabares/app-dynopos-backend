@@ -1,7 +1,10 @@
 import { supabase } from '../config/supabase.js'
 
+const getClient = (req) => req.supabase || supabase
+
 export const getProducts = async (req, res) => {
-    const { data, error } = await supabase
+    const client = getClient(req)
+    const { data, error } = await client
         .from('products')
         .select(
             `id,
@@ -25,7 +28,8 @@ export const getProducts = async (req, res) => {
     res.json(data)
 }
 export const getProductById = async (req, res) => {
-    const { data, error } = await supabase
+    const client = getClient(req)
+    const { data, error } = await client
         .from('products')
         .select(
             `id,
@@ -51,7 +55,8 @@ export const getProductById = async (req, res) => {
 }
 
 export const createProduct = async (req, res) => {
-    const { data, error } = await supabase
+    const client = getClient(req)
+    const { data, error } = await client
         .from('products')
         .insert(req.body)
         .select(
@@ -75,8 +80,9 @@ export const createProduct = async (req, res) => {
     res.status(201).json({ status: 201, message: 'Producto Creado', data })
 }
 export const updateProduct = async (req, res) => {
+    const client = getClient(req)
     const { ProductId } = req.params
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('products')
         .update(req.body)
         .eq('id', ProductId)
@@ -101,29 +107,26 @@ export const updateProduct = async (req, res) => {
     res.json({ status: 200, message: 'Producto Actualizado', data: data[0] })
 }
 export const deleteProduct = async (req, res) => {
+    const client = getClient(req)
     const { ProductId } = req.params
 
     try {
-        // 1. Primero eliminamos la referencia en la tabla inventory
-        const { error: invError } = await supabase
+        const { error: invError } = await client
             .from('inventory')
             .delete()
             .eq('product_id', ProductId)
 
         if (invError) throw invError
 
-        // 2. Luego intentamos eliminar el producto
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('products')
             .delete()
             .eq('id', ProductId)
             .select()
 
         if (error) {
-            // Si el error es por restricción de llave foránea (ej. tiene ventas asociadas)
             if (error.code === '23503') {
-                // Hacemos un "soft delete" desactivando el producto
-                const { data: updatedData, error: updateError } = await supabase
+                const { data: updatedData, error: updateError } = await client
                     .from('products')
                     .update({ is_active: false })
                     .eq('id', ProductId)

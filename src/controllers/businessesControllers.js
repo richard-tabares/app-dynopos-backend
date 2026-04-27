@@ -1,5 +1,7 @@
 import { supabase } from '../config/supabase.js'
 
+const getClient = (req) => req.supabase || supabase
+
 // export const createBusiness = async (req, res) => {
 // 	try {
 // 		const { data: businessData, error: error } = await supabase
@@ -22,9 +24,10 @@ import { supabase } from '../config/supabase.js'
 // }
 
 export const updateBusiness = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
     try {
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('businesses')
             .update(req.body)
             .eq('user_id', id)
@@ -37,9 +40,10 @@ export const updateBusiness = async (req, res) => {
 }
 
 export const deleteBusiness = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
     try {
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('businesses')
             .delete()
             .eq('user_id', id)
@@ -52,9 +56,10 @@ export const deleteBusiness = async (req, res) => {
 }
 
 export const getBusiness = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
     try {
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('businesses')
             .select()
             .eq('user_id', id)
@@ -88,6 +93,7 @@ export const changePassword = async (req, res) => {
 }
 
 export const uploadBusinessLogo = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
     const file = req.file
     if (!file) return res.status(400).json({ error: 'No se subió ningún archivo' })
@@ -96,17 +102,17 @@ export const uploadBusinessLogo = async (req, res) => {
         const ext = file.originalname.split('.').pop()
         const fileName = `logos/${id}-${Date.now()}.${ext}`
 
-        const { error: uploadError } = await supabase.storage
+        const { error: uploadError } = await client.storage
             .from('logos')
             .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true })
 
         if (uploadError) throw new Error(uploadError)
 
-        const { data: { publicUrl } } = supabase.storage
+        const { data: { publicUrl } } = client.storage
             .from('logos')
             .getPublicUrl(fileName)
 
-        const { data: updated, error: updateError } = await supabase
+        const { data: updated, error: updateError } = await client
             .from('businesses')
             .update({ business_logo: publicUrl })
             .eq('user_id', id)

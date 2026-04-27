@@ -1,10 +1,13 @@
 import { supabase } from '../config/supabase.js'
 
+const getClient = (req) => req.supabase || supabase
+
 export const getSales = async (req, res) => {
+	const client = getClient(req)
 	const { businessId } = req.params
 
 	try {
-		const { data: sales, error } = await supabase
+		const { data: sales, error } = await client
 			.from('salesTickets')
 			.select(`
 				id,
@@ -44,6 +47,7 @@ export const getSales = async (req, res) => {
 }
 
 export const createSale = async (req, res) => {
+	const client = getClient(req)
 	const { business_id, payment_method, status, salesItems } =
 		req.body
 
@@ -54,17 +58,15 @@ export const createSale = async (req, res) => {
 				.json({ error: 'No se proporcionaron items de venta' })
 		}
 
-		//Obtener ids de productos vendidos
 		const productIds = salesItems.map((item) => item.product_id)
-		// Obtener precios de productos e inventario segun los ids
-		const { data: products, error: productsError } = await supabase
+		const { data: products, error: productsError } = await client
 			.from('products')
 			.select('id, name, price, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
 
-		//Validamos el stock disponible
+
 		for (const item of salesItems) {
 			const product = products.find((p) => p.id === item.product_id)
 			if (!product) {
@@ -98,7 +100,7 @@ export const createSale = async (req, res) => {
 		const now = new Date()
 		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
-		const { data, error: salesError } = await supabase
+		const { data, error: salesError } = await client
 			.from('salesTickets')
 			.insert([
 				{
@@ -121,7 +123,7 @@ export const createSale = async (req, res) => {
 		}))
 
 		//Insertar items de venta
-		const { data: itemsData, error: itemsError } = await supabase
+		const { data: itemsData, error: itemsError } = await client
 			.from('salesItems')
 			.insert(itemsToInsert)
 			.select()
@@ -136,7 +138,7 @@ export const createSale = async (req, res) => {
 			const newStock = currentStock - item.quantity
 
 			//Actualizar stock en tabla inventory
-			const { error: updateStockError } = await supabase
+			const { error: updateStockError } = await client
 				.from('inventory')
 				.update({ stock: newStock })
 				.eq('product_id', item.product_id)
@@ -163,6 +165,7 @@ export const createSale = async (req, res) => {
 }
 
 export const returnSale = async (req, res) => {
+	const client = getClient(req)
 	const { id } = req.params
 	const { reason, business_id, items } = req.body
 
@@ -174,7 +177,7 @@ export const returnSale = async (req, res) => {
 			return res.status(400).json({ error: 'Debe seleccionar al menos un producto para devolver' })
 		}
 
-		const { data: sale, error: saleError } = await supabase
+		const { data: sale, error: saleError } = await client
 			.from('salesTickets')
 			.select('id, total_amount, status, business_id')
 			.eq('id', id)
@@ -187,7 +190,7 @@ export const returnSale = async (req, res) => {
 		}
 
 		const productIds = items.map(item => item.product_id)
-		const { data: products, error: productsError } = await supabase
+		const { data: products, error: productsError } = await client
 			.from('products')
 			.select('id, inventory(stock)')
 			.in('id', productIds)
@@ -205,7 +208,7 @@ export const returnSale = async (req, res) => {
 			const currentStock = product.inventory?.[0]?.stock || 0
 			const newStock = currentStock + returnItem.quantity
 
-			const { error: updateStockError } = await supabase
+			const { error: updateStockError } = await client
 				.from('inventory')
 				.update({ stock: newStock })
 				.eq('product_id', returnItem.product_id)
@@ -215,7 +218,7 @@ export const returnSale = async (req, res) => {
 			totalReturnAmount += returnItem.subtotal
 		}
 
-		const { data: returnRecord, error: returnError } = await supabase
+		const { data: returnRecord, error: returnError } = await client
 			.from('returns')
 			.insert({
 				sale_id: sale.id,
@@ -238,14 +241,14 @@ export const returnSale = async (req, res) => {
 			created_at: localDate
 		}))
 
-		const { error: returnItemsError } = await supabase
+		const { error: returnItemsError } = await client
 			.from('returns_items')
 			.insert(returnItems)
 
 		if (returnItemsError) throw new Error(returnItemsError)
 
 		// Check if all original items were returned
-		const { data: originalItems, error: originalError } = await supabase
+		const { data: originalItems, error: originalError } = await client
 			.from('salesItems')
 			.select('product_id, quantity')
 			.eq('sale_id', id)
@@ -258,7 +261,7 @@ export const returnSale = async (req, res) => {
 		})
 
 		if (allReturned) {
-			const { data: updatedSale, error: updateSaleError } = await supabase
+			const { data: updatedSale, error: updateSaleError } = await client
 				.from('salesTickets')
 				.update({ status: 'returned' })
 				.eq('id', id)

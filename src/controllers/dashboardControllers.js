@@ -1,5 +1,7 @@
 import { supabase } from '../config/supabase.js'
 
+const getClient = (req) => req.supabase || supabase
+
 export const getDashboardMetrics = async (req, res) => {
     const { businessId } = req.params
     const now = new Date()
@@ -10,7 +12,7 @@ export const getDashboardMetrics = async (req, res) => {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
         const sevenDaysAgoStr = `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`
 
-        // Run all independent queries in parallel
+        const client = getClient(req)
         const [
             { data: todaySalesData, error: todaySalesError },
             { count: activeProductsCount, error: productsError },
@@ -19,30 +21,30 @@ export const getDashboardMetrics = async (req, res) => {
             { data: recentSales, error: recentError },
             { data: allSalesItems, error: itemsError }
         ] = await Promise.all([
-            supabase
+            client
                 .from('salesTickets')
                 .select('total_amount')
                 .eq('business_id', businessId)
                 .eq('created_at', todayStr)
                 .neq('status', 'returned'),
-            supabase
+            client
                 .from('products')
                 .select('*', { count: 'exact', head: true })
                 .eq('business_id', businessId)
                 .eq('is_active', true),
-            supabase
+            client
                 .from('products')
                 .select('id, name, inventory(stock, min_stock)')
                 .eq('business_id', businessId)
                 .eq('is_active', true),
-            supabase
+            client
                 .from('salesTickets')
                 .select('total_amount, created_at')
                 .eq('business_id', businessId)
                 .gte('created_at', sevenDaysAgoStr)
                 .neq('status', 'returned')
                 .order('created_at', { ascending: true }),
-            supabase
+            client
                 .from('salesTickets')
                 .select(`
                     id,
@@ -54,7 +56,7 @@ export const getDashboardMetrics = async (req, res) => {
                 .eq('business_id', businessId)
                 .order('id', { ascending: false })
                 .limit(50),
-            supabase
+            client
                 .from('salesItems')
                 .select('product_id, quantity, subtotal, unit_price, products!inner(name, business_id)')
                 .eq('products.business_id', businessId)

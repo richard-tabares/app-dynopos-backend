@@ -1,7 +1,10 @@
 import { supabase } from '../config/supabase.js'
 
+const getClient = (req) => req.supabase || supabase
+
 export const getCategories = async (req, res) => {
-    const { data, error } = await supabase
+    const client = getClient(req)
+    const { data, error } = await client
         .from('categories')
         .select('id, name')
         .eq('business_id', req.params.businessId)
@@ -11,7 +14,8 @@ export const getCategories = async (req, res) => {
 }
 
 export const createCategory = async (req, res) => {
-    const { data, error } = await supabase
+    const client = getClient(req)
+    const { data, error } = await client
         .from('categories')
         .insert(req.body)
         .select()
@@ -21,8 +25,9 @@ export const createCategory = async (req, res) => {
 }
 
 export const updateCategory = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('categories')
         .update(req.body)
         .eq('id', id)
@@ -33,8 +38,9 @@ export const updateCategory = async (req, res) => {
 }
 
 export const deleteCategory = async (req, res) => {
+    const client = getClient(req)
     const { id } = req.params
-    const { data, error } = await supabase
+    const { data, error } = await client
         .from('categories')
         .delete()
         .eq('id', id)

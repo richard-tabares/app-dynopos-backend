@@ -32,6 +32,7 @@ export const login = async (req, res) => {
             data,
             profile: profileData,
             business: businessData,
+            access_token: data.session?.access_token,
         })
     } catch (error) {
         return res.status(500).json({ error: error.message })
@@ -80,6 +81,7 @@ export const signup = async (req, res) => {
             status: 201,
             message: 'Usuario creado exitosamente',
             data,
+            access_token: data.session?.access_token,
         })
     } catch (error) {
         return res.status(500).json({ error: error.message })
