@@ -111,13 +111,6 @@ export const deleteProduct = async (req, res) => {
     const { ProductId } = req.params
 
     try {
-        const { error: invError } = await client
-            .from('inventory')
-            .delete()
-            .eq('product_id', ProductId)
-
-        if (invError) throw invError
-
         const { data, error } = await client
             .from('products')
             .delete()
@@ -146,6 +139,13 @@ export const deleteProduct = async (req, res) => {
         if (!data || data.length === 0) {
             return res.status(404).json({ error: 'Producto no encontrado' })
         }
+
+        const { error: invError } = await client
+            .from('inventory')
+            .delete()
+            .eq('product_id', ProductId)
+
+        if (invError) throw invError
 
         res.json({ status: 200, message: 'Producto Eliminado permanentemente', data: data[0] })
     } catch (error) {
