@@ -13,6 +13,7 @@ export const getProducts = async (req, res) => {
             sku,
             price,
             is_active,
+            track_stock,
             categories (
                 id,
                 name
@@ -38,6 +39,7 @@ export const getProductById = async (req, res) => {
             sku,
             price,
             is_active,
+            track_stock,
             categories (
                 id,
                 name
@@ -80,6 +82,7 @@ export const createProduct = async (req, res) => {
                 sku,
                 price,
                 is_active,
+                track_stock,
                 categories (
                     id,
                     name
@@ -128,6 +131,7 @@ export const updateProduct = async (req, res) => {
                 sku,
                 price,
                 is_active,
+                track_stock,
                 categories (
                     id,
                     name

@@ -61,7 +61,7 @@ export const createSale = async (req, res) => {
 		const productIds = salesItems.map((item) => item.product_id)
 		const { data: products, error: productsError } = await client
 			.from('products')
-			.select('id, name, price, inventory(stock)')
+			.select('id, name, price, track_stock, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
@@ -74,6 +74,7 @@ export const createSale = async (req, res) => {
 					error: `Producto con ID ${item.product_id} no encontrado`,
 				})
 			}
+			if (product.track_stock === false) continue
 			const currentStock = product.inventory?.[0]?.stock || 0
 			if (item.quantity > currentStock) {
 				return res.status(400).json({
@@ -133,6 +134,7 @@ export const createSale = async (req, res) => {
 		//Reducir stock de productos vendidos
 		for (const item of itemsWithPrices) {
 			const product = products.find((p) => p.id === item.product_id)
+			if (product.track_stock === false) continue
 			//Calcular nuevo stock
 			const currentStock = product.inventory?.[0]?.stock || 0
 			const newStock = currentStock - item.quantity
@@ -192,7 +194,7 @@ export const returnSale = async (req, res) => {
 		const productIds = items.map(item => item.product_id)
 		const { data: products, error: productsError } = await client
 			.from('products')
-			.select('id, inventory(stock)')
+			.select('id, track_stock, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
@@ -203,6 +205,11 @@ export const returnSale = async (req, res) => {
 			const product = products.find(p => p.id === returnItem.product_id)
 			if (!product) {
 				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado` })
+			}
+
+			if (product.track_stock === false) {
+				totalReturnAmount += returnItem.subtotal
+				continue
 			}
 
 			const currentStock = product.inventory?.[0]?.stock || 0
