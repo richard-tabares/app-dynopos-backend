@@ -127,6 +127,54 @@ export const signup = async (req, res) => {
     }
 }
 
+export const forgotPassword = async (req, res) => {
+    const { email } = req.body
+    try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: 'http://localhost:5173/reset-password',
+        })
+        if (error) throw new Error(error.message)
+        return res.json({
+            status: 200,
+            message: 'Correo enviado',
+        })
+    } catch (error) {
+        return res.status(500).json({ error: error.message })
+    }
+}
+
+export const resetPassword = async (req, res) => {
+    const { access_token, refresh_token, password } = req.body
+    try {
+        const supabaseClient = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                auth: {
+                    autoRefreshToken: false,
+                    persistSession: false,
+                    detectSessionInUrl: false,
+                },
+            }
+        )
+        const { error: sessionError } = await supabaseClient.auth.setSession({
+            access_token,
+            refresh_token,
+        })
+        if (sessionError) {
+            return res.status(400).json({ error: sessionError.message })
+        }
+        const { data, error } = await supabaseClient.auth.updateUser({ password })
+        if (error) throw new Error(error.message)
+        return res.json({
+            status: 200,
+            message: 'Contraseña actualizada exitosamente',
+        })
+    } catch (error) {
+        return res.status(500).json({ error: error.message })
+    }
+}
+
 export const logout = async (req, res) => {
     try {
         const { error } = await supabase.auth.signOut()
