@@ -55,56 +55,95 @@ export const getProductById = async (req, res) => {
 }
 
 export const createProduct = async (req, res) => {
-    const client = getClient(req)
-    const { data, error } = await client
-        .from('products')
-        .insert(req.body)
-        .select(
-            `id,
-            business_id,
-            name,
-            sku,
-            price,
-            is_active,
-            categories (
-                id,
-                name
-            ),
-            inventory (
-                stock,
-                min_stock
-            )`
-        )
+    try {
+        const client = getClient(req)
+        const { sku, business_id } = req.body
 
-    if (error) return res.status(500).json(error)
-    res.status(201).json({ status: 201, message: 'Producto Creado', data })
+        const { data: existing } = await client
+            .from('products')
+            .select('id')
+            .eq('sku', sku)
+            .eq('business_id', business_id)
+            .maybeSingle()
+
+        if (existing) {
+            return res.status(409).json({ error: 'Ya existe un producto con este SKU' })
+        }
+
+        const { data, error } = await client
+            .from('products')
+            .insert(req.body)
+            .select(
+                `id,
+                business_id,
+                name,
+                sku,
+                price,
+                is_active,
+                categories (
+                    id,
+                    name
+                ),
+                inventory (
+                    stock,
+                    min_stock
+                )`
+            )
+
+        if (error) throw error
+        res.status(201).json({ status: 201, message: 'Producto Creado', data })
+    } catch (error) {
+        console.error('Create product error:', error)
+        res.status(500).json({ error: error.message })
+    }
 }
 export const updateProduct = async (req, res) => {
-    const client = getClient(req)
-    const { ProductId } = req.params
-    const { data, error } = await client
-        .from('products')
-        .update(req.body)
-        .eq('id', ProductId)
-        .select(
-            `id,
-            business_id,
-            name,
-            sku,
-            price,
-            is_active,
-            categories (
-                id,
-                name
-            ),
-            inventory (
-                stock,
-                min_stock
-            )`
-        )
+    try {
+        const client = getClient(req)
+        const { ProductId } = req.params
+        const { sku, business_id } = req.body
 
-    if (error) return res.status(500).json(error)
-    res.json({ status: 200, message: 'Producto Actualizado', data: data[0] })
+        if (sku && business_id) {
+            const { data: existing } = await client
+                .from('products')
+                .select('id')
+                .eq('sku', sku)
+                .eq('business_id', business_id)
+                .neq('id', ProductId)
+                .maybeSingle()
+
+            if (existing) {
+                return res.status(409).json({ error: 'Ya existe otro producto con este SKU' })
+            }
+        }
+
+        const { data, error } = await client
+            .from('products')
+            .update(req.body)
+            .eq('id', ProductId)
+            .select(
+                `id,
+                business_id,
+                name,
+                sku,
+                price,
+                is_active,
+                categories (
+                    id,
+                    name
+                ),
+                inventory (
+                    stock,
+                    min_stock
+                )`
+            )
+
+        if (error) throw error
+        res.json({ status: 200, message: 'Producto Actualizado', data: data[0] })
+    } catch (error) {
+        console.error('Update product error:', error)
+        res.status(500).json({ error: error.message })
+    }
 }
 export const deleteProduct = async (req, res) => {
     const client = getClient(req)
