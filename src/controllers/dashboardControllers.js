@@ -6,59 +6,75 @@ export const getDashboardMetrics = async (req, res) => {
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
     try {
-        // 1. Metrics: Today's Sales & Revenue
-        const { data: todaySalesData, error: todaySalesError } = await supabase
-            .from('salesTickets')
-            .select('total_amount')
-            .eq('business_id', businessId)
-            .eq('created_at', todayStr)
-            .neq('status', 'returned')
-
-        if (todaySalesError) throw todaySalesError
-
-        const todaySalesCount = todaySalesData.length
-        const todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
-
-        // 2. Metrics: Active Products Count
-        const { count: activeProductsCount, error: productsError } = await supabase
-            .from('products')
-            .select('*', { count: 'exact', head: true })
-            .eq('business_id', businessId)
-            .eq('is_active', true)
-
-        if (productsError) throw productsError
-
-        // 3. Metrics: Stock Alerts (Stock <= Min Stock)
-        const { data: inventoryData, error: inventoryError } = await supabase
-            .from('products')
-            .select('id, name, inventory(stock, min_stock)')
-            .eq('business_id', businessId)
-            .eq('is_active', true)
-
-        if (inventoryError) throw inventoryError
-
-        const stockAlerts = inventoryData.filter(p => {
-            const inv = p.inventory?.[0]
-            // Solo contar como alerta si el stock es menor o igual al mínimo Y el mínimo es mayor a 0
-            return inv && inv.stock <= inv.min_stock && inv.min_stock > 0
-        }).length
-
-        // 4. Weekly Sales (Last 7 days)
         const sevenDaysAgo = new Date()
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
         const sevenDaysAgoStr = `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`
 
-        const { data: weeklySalesData, error: weeklyError } = await supabase
-            .from('salesTickets')
-            .select('total_amount, created_at')
-            .eq('business_id', businessId)
-            .gte('created_at', sevenDaysAgoStr)
-            .neq('status', 'returned')
-            .order('created_at', { ascending: true })
+        // Run all independent queries in parallel
+        const [
+            { data: todaySalesData, error: todaySalesError },
+            { count: activeProductsCount, error: productsError },
+            { data: inventoryData, error: inventoryError },
+            { data: weeklySalesData, error: weeklyError },
+            { data: recentSales, error: recentError },
+            { data: allSalesItems, error: itemsError }
+        ] = await Promise.all([
+            supabase
+                .from('salesTickets')
+                .select('total_amount')
+                .eq('business_id', businessId)
+                .eq('created_at', todayStr)
+                .neq('status', 'returned'),
+            supabase
+                .from('products')
+                .select('*', { count: 'exact', head: true })
+                .eq('business_id', businessId)
+                .eq('is_active', true),
+            supabase
+                .from('products')
+                .select('id, name, inventory(stock, min_stock)')
+                .eq('business_id', businessId)
+                .eq('is_active', true),
+            supabase
+                .from('salesTickets')
+                .select('total_amount, created_at')
+                .eq('business_id', businessId)
+                .gte('created_at', sevenDaysAgoStr)
+                .neq('status', 'returned')
+                .order('created_at', { ascending: true }),
+            supabase
+                .from('salesTickets')
+                .select(`
+                    id,
+                    total_amount,
+                    created_at,
+                    payment_method,
+                    salesItems(quantity, unit_price, subtotal, products(name))
+                `)
+                .eq('business_id', businessId)
+                .order('id', { ascending: false })
+                .limit(50),
+            supabase
+                .from('salesItems')
+                .select('product_id, quantity, subtotal, unit_price, products!inner(name, business_id)')
+                .eq('products.business_id', businessId)
+        ])
 
+        if (todaySalesError) throw todaySalesError
+        if (productsError) throw productsError
+        if (inventoryError) throw inventoryError
         if (weeklyError) throw weeklyError
+        if (recentError) throw recentError
 
-        // 5. Low Stock Items (Top 10)
+        // Process data (in-memory operations, no DB queries)
+        const todaySalesCount = todaySalesData.length
+        const todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
+
+        const stockAlerts = inventoryData.filter(p => {
+            const inv = p.inventory?.[0]
+            return inv && inv.stock <= inv.min_stock && inv.min_stock > 0
+        }).length
+
         const sortedLowStock = inventoryData
             .filter(p => {
                 const inv = p.inventory?.[0]
@@ -72,28 +88,6 @@ export const getDashboardMetrics = async (req, res) => {
                 stock: p.inventory[0].stock,
                 min_stock: p.inventory[0].min_stock
             }))
-
-        // 6. Recent Sales (Last 50 for pagination)
-        const { data: recentSales, error: recentError } = await supabase
-            .from('salesTickets')
-            .select(`
-                id,
-                total_amount,
-                created_at,
-                payment_method,
-                salesItems(quantity, unit_price, subtotal, products(name))
-            `)
-            .eq('business_id', businessId)
-            .order('id', { ascending: false }) // Order by ID descending for most recent first
-            .limit(50)
-
-        if (recentError) throw recentError
-
-        // 7. Top Products (Top 10 by volume)
-        const { data: allSalesItems, error: itemsError } = await supabase
-            .from('salesItems')
-            .select('product_id, quantity, subtotal, unit_price, products!inner(name, business_id)')
-            .eq('products.business_id', businessId)
 
         let topProducts = []
         if (!itemsError) {
