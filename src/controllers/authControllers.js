@@ -1,4 +1,5 @@
-import { supabase } from '../config/supabase.js'
+import { createClient } from '@supabase/supabase-js'
+import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 
 export const login = async (req, res) => {
     const { email, password } = req.body
@@ -39,6 +40,44 @@ export const login = async (req, res) => {
     }
 }
 
+export const confirmEmail = async (req, res) => {
+    const { access_token, refresh_token } = req.body
+
+    try {
+        const supabaseClient = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                auth: {
+                    autoRefreshToken: false,
+                    persistSession: false,
+                    detectSessionInUrl: false,
+                },
+            }
+        )
+
+        const { data, error } = await supabaseClient.auth.setSession({
+            access_token,
+            refresh_token,
+        })
+
+        if (error) {
+            return res.status(400).json({ error: error.message })
+        }
+
+        if (!data.user) {
+            return res.status(400).json({ error: 'Token inválido' })
+        }
+
+        return res.json({
+            status: 200,
+            message: 'Correo confirmado exitosamente',
+        })
+    } catch (error) {
+        return res.status(500).json({ error: error.message })
+    }
+}
+
 export const signup = async (req, res) => {
     const { business_name, owner_name, email, password, phone } = req.body
 
@@ -53,14 +92,14 @@ export const signup = async (req, res) => {
             throw new Error('El usuario no se pudo crear. Revisa que el correo no esté registrado.')
         }
 
-        const { error: profileError } = await supabase.from('profiles').insert({
+        const { error: profileError } = await serviceRoleSupabase.from('profiles').insert({
             user_id: data.user.id,
             display_name: '',
             role: 'admin',
         })
         if (profileError) throw new Error(profileError.message)
 
-        const { error: businessError } = await supabase
+        const { error: businessError } = await serviceRoleSupabase
             .from('businesses')
             .insert({
                 user_id: data.user.id,
@@ -71,7 +110,7 @@ export const signup = async (req, res) => {
             })
         if (businessError) throw new Error(businessError.message)
 
-        const { error: categoryError } = await supabase.from('categories').insert({
+        const { error: categoryError } = await serviceRoleSupabase.from('categories').insert({
             business_id: data.user.id,
             name: 'General',
         })
