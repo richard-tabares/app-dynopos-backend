@@ -94,6 +94,7 @@ export const createSale = async (req, res) => {
 				...item,
 				unit_price: product.price,
 				subtotal,
+				track_stock: product.track_stock ?? true,
 			}
 		})
 
@@ -191,28 +192,40 @@ export const returnSale = async (req, res) => {
 			return res.status(400).json({ error: 'La venta ya ha sido devuelta' })
 		}
 
-		const productIds = items.map(item => item.product_id)
-		const { data: products, error: productsError } = await client
-			.from('products')
-			.select('id, track_stock, inventory(stock)')
-			.in('id', productIds)
+		const { data: originalSalesItems, error: originalItemsError } = await client
+			.from('salesItems')
+			.select('product_id, track_stock, quantity')
+			.eq('sale_id', id)
 
-		if (productsError) throw new Error(productsError)
+		if (originalItemsError) throw new Error(originalItemsError)
 
 		let totalReturnAmount = 0
 
 		for (const returnItem of items) {
-			const product = products.find(p => p.id === returnItem.product_id)
-			if (!product) {
-				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado` })
+			const saleItem = originalSalesItems.find(si => si.product_id === returnItem.product_id)
+			if (!saleItem) {
+				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado en la venta original` })
 			}
 
-			if (product.track_stock === false) {
+			const maxQty = saleItem.quantity || 0
+			if (returnItem.quantity > maxQty) {
+				return res.status(400).json({
+					error: `No puedes devolver más de ${maxQty} unidades del producto`
+				})
+			}
+
+			if (saleItem.track_stock === false) {
 				totalReturnAmount += returnItem.subtotal
 				continue
 			}
 
-			const currentStock = product.inventory?.[0]?.stock || 0
+			const { data: product } = await client
+				.from('products')
+				.select('id, inventory(stock)')
+				.eq('id', returnItem.product_id)
+				.single()
+
+			const currentStock = product?.inventory?.[0]?.stock || 0
 			const newStock = currentStock + returnItem.quantity
 
 			const { error: updateStockError } = await client
@@ -255,14 +268,7 @@ export const returnSale = async (req, res) => {
 		if (returnItemsError) throw new Error(returnItemsError)
 
 		// Check if all original items were returned
-		const { data: originalItems, error: originalError } = await client
-			.from('salesItems')
-			.select('product_id, quantity')
-			.eq('sale_id', id)
-
-		if (originalError) throw new Error(originalError)
-
-		const allReturned = originalItems.every(orig => {
+		const allReturned = originalSalesItems.every(orig => {
 			const returned = items.find(r => r.product_id === orig.product_id)
 			return returned && returned.quantity >= orig.quantity
 		})
