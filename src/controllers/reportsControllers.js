@@ -231,10 +231,10 @@ export const getReports = async (req, res) => {
                 .eq('business_id', businessId)
 
             if (productSearch) {
-                query = query.or(`product_name.ilike.%${productSearch}%,sku.ilike.%${productSearch}%`)
+                query = query.or(`product_name.ilike.%${productSearch}%,sku.eq.${productSearch}`)
             }
 
-            const { data, error } = await query.order('total_quantity_sold', { ascending: false }).limit(20)
+            const { data, error } = await query.order('total_quantity_sold', { ascending: false }).limit(10)
 
             if (error) throw error
 
@@ -245,19 +245,31 @@ export const getReports = async (req, res) => {
         }
 
         if (section === 'returns') {
-            let query = client
-                .from('vw_returns_summary')
-                .select('*')
-                .eq('business_id', businessId)
-            query = addReturnDateRange(query, start, end)
-            const { data: returnsData, error: returnsError } = await query.order('return_date', { ascending: false })
+            const buildSummaryQuery = () => {
+                let q = client.from('vw_returns_summary').select('*').eq('business_id', businessId)
+                q = addReturnDateRange(q, start, end)
+                return q.order('return_date', { ascending: false })
+            }
 
-            if (returnsError) throw returnsError
+            const buildListQuery = () => {
+                let q = client.from('vw_returns_list').select('*').eq('business_id', businessId)
+                q = addReturnDateRange(q, start, end)
+                return q.order('return_date', { ascending: false })
+            }
+
+            const [
+                { data: chartData, error: summaryError },
+                { data: listData, error: listError }
+            ] = await Promise.all([buildSummaryQuery(), buildListQuery()])
+
+            if (summaryError) throw summaryError
+            if (listError) throw listError
 
             return res.json({
                 section: 'returns',
                 data: {
-                    returns: returnsData || []
+                    chart: chartData || [],
+                    list: listData || []
                 }
             })
         }
