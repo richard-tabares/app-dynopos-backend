@@ -8,18 +8,11 @@ export const getSales = async (req, res) => {
 
 	try {
 		const { data: sales, error } = await client
-			.from('salesTickets')
-			.select(`
-				id,
-				total_amount,
-				created_at,
-				payment_method,
-				status,
-				salesItems(id, product_id, quantity, unit_price, subtotal, products(name))
-			`)
+			.from('vw_sales_history')
+			.select('*')
 			.eq('business_id', businessId)
 			.order('id', { ascending: false })
-			.limit(50)
+			.limit(10)
 
 		if (error) throw new Error(error)
 
@@ -29,15 +22,8 @@ export const getSales = async (req, res) => {
 			date: s.created_at,
 			paymentMethod: s.payment_method,
 			status: s.status,
-			items: s.salesItems.map(item => ({
-				id: item.id,
-				product_id: item.product_id,
-				quantity: item.quantity,
-				price: item.unit_price,
-				subtotal: item.subtotal,
-				name: item.products?.name || 'Producto eliminado'
-			})),
-			itemsCount: s.salesItems.reduce((acc, i) => acc + i.quantity, 0)
+			items: s.items,
+			itemsCount: s.items_count
 		}))
 
 		res.json(formatted)

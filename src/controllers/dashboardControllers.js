@@ -19,7 +19,7 @@ export const getDashboardMetrics = async (req, res) => {
             { data: inventoryData, error: inventoryError },
             { data: weeklySalesData, error: weeklyError },
             { data: recentSales, error: recentError },
-            { data: allSalesItems, error: itemsError }
+            { data: topProductsData, error: topError }
         ] = await Promise.all([
             client
                 .from('salesTickets')
@@ -45,21 +45,17 @@ export const getDashboardMetrics = async (req, res) => {
                 .neq('status', 'returned')
                 .order('created_at', { ascending: true }),
             client
-                .from('salesTickets')
-                .select(`
-                    id,
-                    total_amount,
-                    created_at,
-                    payment_method,
-                    salesItems(quantity, unit_price, subtotal, products(name))
-                `)
+                .from('vw_sales_history')
+                .select('*')
                 .eq('business_id', businessId)
                 .order('id', { ascending: false })
-                .limit(50),
+                .limit(10),
             client
-                .from('salesItems')
-                .select('product_id, quantity, subtotal, unit_price, products!inner(name, business_id)')
-                .eq('products.business_id', businessId)
+                .from('vw_top_products')
+                .select('product_name, total_quantity_sold, total_revenue')
+                .eq('business_id', businessId)
+                .order('total_quantity_sold', { ascending: false })
+                .limit(10)
         ])
 
         if (todaySalesError) throw todaySalesError
@@ -67,8 +63,8 @@ export const getDashboardMetrics = async (req, res) => {
         if (inventoryError) throw inventoryError
         if (weeklyError) throw weeklyError
         if (recentError) throw recentError
+        if (topError) throw topError
 
-        // Process data (in-memory operations, no DB queries)
         const todaySalesCount = todaySalesData.length
         const todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
 
@@ -91,29 +87,11 @@ export const getDashboardMetrics = async (req, res) => {
                 min_stock: p.inventory[0].min_stock
             }))
 
-        let topProducts = []
-        if (!itemsError) {
-            const productSales = {}
-            allSalesItems.forEach(item => {
-                const id = item.product_id
-                if (!productSales[id]) {
-                    productSales[id] = { 
-                        name: item.products.name, 
-                        sales: 0,
-                        totalRevenue: 0 
-                    }
-                }
-                const quantity = Number(item.quantity) || 0
-                const subtotal = Number(item.subtotal) || (Number(item.unit_price) * quantity) || 0
-                
-                productSales[id].sales += quantity
-                productSales[id].totalRevenue += subtotal
-            })
-
-            topProducts = Object.values(productSales)
-                .sort((a, b) => b.sales - a.sales)
-                .slice(0, 10)
-        }
+        const topProducts = topProductsData.map(p => ({
+            name: p.product_name,
+            sales: p.total_quantity_sold,
+            totalRevenue: p.total_revenue
+        }))
 
         res.json({
             metrics: {
@@ -129,13 +107,8 @@ export const getDashboardMetrics = async (req, res) => {
                 total: s.total_amount,
                 date: s.created_at,
                 paymentMethod: s.payment_method,
-                items: s.salesItems.map(item => ({
-                    quantity: item.quantity,
-                    price: item.unit_price,
-                    subtotal: item.subtotal,
-                    name: item.products?.name || 'Producto eliminado'
-                })),
-                itemsCount: s.salesItems.reduce((acc, i) => acc + i.quantity, 0)
+                items: s.items,
+                itemsCount: s.items_count
             })),
             topProducts
         })

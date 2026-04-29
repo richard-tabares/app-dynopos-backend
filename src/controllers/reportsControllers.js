@@ -132,6 +132,30 @@ export const getReports = async (req, res) => {
             })
         }
 
+        if (section === 'recent_sales') {
+            let query = client
+                .from('vw_sales_history')
+                .select('*')
+                .eq('business_id', businessId)
+            if (start) query = query.gte('created_at', start)
+            if (end) query = query.lte('created_at', end)
+
+            const { data, error } = await query.order('id', { ascending: false }).limit(10)
+            if (error) throw error
+
+            return res.json({
+                section: 'recent_sales',
+                data: (data || []).map(s => ({
+                    id: s.id,
+                    total: s.total_amount,
+                    date: s.created_at,
+                    paymentMethod: s.payment_method,
+                    items: s.items,
+                    itemsCount: s.items_count
+                }))
+            })
+        }
+
         if (section === 'inventory') {
             const queries = []
 

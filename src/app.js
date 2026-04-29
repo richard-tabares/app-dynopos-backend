@@ -8,6 +8,7 @@ import salesRoutes from './routes/salesRoutes.js'
 import inventoryRoutes from './routes/inventoryRoutes.js'
 import dashboardRoutes from './routes/dashboardRoutes.js'
 import reportsRoutes from './routes/reportsRoutes.js'
+import revenueRoutes from './routes/revenueRoutes.js'
 
 const app = express()
 
@@ -22,6 +23,7 @@ app.use('/api/sales', salesRoutes)
 app.use('/api/inventory', inventoryRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/reports', reportsRoutes)
+app.use('/api/revenue', revenueRoutes)
 
 // Global error handler
 app.use((err, req, res, next) => {
