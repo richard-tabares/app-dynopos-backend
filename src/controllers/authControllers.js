@@ -9,8 +9,12 @@ export const login = async (req, res) => {
             password: password,
         })
 
-        if (error) throw new Error(error.message)
-        if (!data.user) throw new Error('Credenciales incorrectas')
+        if (error) {
+            return res.status(401).json({ error: error.message })
+        }
+        if (!data.user) {
+            return res.status(401).json({ error: 'Credenciales incorrectas' })
+        }
 
         const { data: profileData, error: profileError } = await supabase
             .from('profiles')
