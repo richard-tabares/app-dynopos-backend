@@ -16,6 +16,8 @@ select
     p.id as product_id,
     p.name as product_name,
     p.business_id,
+    c.id as category_id,
+    c.name as category_name,
     coalesce(i.stock, 0) as current_stock,
     coalesce(i.min_stock, 0) as min_stock,
     case
@@ -26,5 +28,6 @@ select
         else 'con_stock'::text
     end as stock_status
 from products p
+left join categories c on c.id = p.category_id
 left join inventory i on i.product_id = p.id
 where p.is_active = true;
