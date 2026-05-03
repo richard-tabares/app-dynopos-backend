@@ -140,7 +140,7 @@ export const getReports = async (req, res) => {
             if (start) query = query.gte('created_at', start)
             if (end) query = query.lte('created_at', end)
 
-            const { data, error } = await query.order('id', { ascending: false }).limit(10)
+            const { data, error } = await query.order('id', { ascending: false }).limit(50)
             if (error) throw error
 
             return res.json({
@@ -150,6 +150,7 @@ export const getReports = async (req, res) => {
                     total: s.total_amount,
                     date: s.created_at,
                     paymentMethod: s.payment_method,
+                    status: s.status,
                     items: s.items,
                     itemsCount: s.items_count
                 }))
