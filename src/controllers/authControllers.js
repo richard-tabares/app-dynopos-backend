@@ -179,6 +179,37 @@ export const resetPassword = async (req, res) => {
     }
 }
 
+export const refreshSession = async (req, res) => {
+    const { refresh_token } = req.body
+    if (!refresh_token) {
+        return res.status(400).json({ error: 'Refresh token requerido' })
+    }
+    try {
+        const supabaseClient = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+                auth: {
+                    autoRefreshToken: false,
+                    persistSession: false,
+                    detectSessionInUrl: false,
+                },
+            }
+        )
+        const { data, error } = await supabaseClient.auth.refreshSession({ refresh_token })
+        if (error || !data.session) {
+            return res.status(401).json({ error: 'Sesión expirada' })
+        }
+        return res.json({
+            status: 200,
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+        })
+    } catch (error) {
+        return res.status(500).json({ error: error.message })
+    }
+}
+
 export const logout = async (req, res) => {
     try {
         const { error } = await supabase.auth.signOut()
