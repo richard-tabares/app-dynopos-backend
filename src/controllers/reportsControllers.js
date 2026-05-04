@@ -42,6 +42,140 @@ export const getReports = async (req, res) => {
             end = endDate
         }
 
+        if (section === 'profitability') {
+            const { data: sales, error: salesError } = await client
+                .from('salesTickets')
+                .select('id, total_amount, created_at')
+                .eq('business_id', businessId)
+                .neq('status', 'returned')
+
+            if (salesError) throw salesError
+
+            let filteredSales = sales
+            if (start) filteredSales = filteredSales.filter(s => s.created_at >= start)
+            if (end) filteredSales = filteredSales.filter(s => s.created_at <= end)
+
+            const saleIds = filteredSales.map(s => s.id)
+            let costByDate = {}
+            let revenueByDate = {}
+
+            if (saleIds.length > 0) {
+                const { data: items, error: itemsError } = await client
+                    .from('salesItems')
+                    .select('sale_id, unit_cost, quantity, subtotal, created_at')
+                    .in('sale_id', saleIds)
+
+                if (itemsError) throw itemsError
+
+                for (const item of items || []) {
+                    const date = item.created_at || filteredSales.find(s => s.id === item.sale_id)?.created_at
+                    if (!date) continue
+
+                    if (!costByDate[date]) costByDate[date] = 0
+                    if (!revenueByDate[date]) revenueByDate[date] = 0
+
+                    costByDate[date] += (item.unit_cost || 0) * item.quantity
+                    revenueByDate[date] += item.subtotal
+                }
+            }
+
+            const dailyProfit = Object.keys(costByDate).map(date => ({
+                date,
+                revenue: revenueByDate[date] || 0,
+                cost: costByDate[date] || 0,
+                profit: (revenueByDate[date] || 0) - (costByDate[date] || 0)
+            })).sort((a, b) => a.date.localeCompare(b.date))
+
+            const totalRevenue = Object.values(revenueByDate).reduce((a, b) => a + b, 0)
+            const totalCost = Object.values(costByDate).reduce((a, b) => a + b, 0)
+            const totalProfit = totalRevenue - totalCost
+            const overallMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0
+
+            const { data: products, error: prodError } = await client
+                .from('products')
+                .select(`id, name, unit_cost, inventory(stock)`)
+                .eq('business_id', businessId)
+                .eq('is_active', true)
+
+            if (prodError) throw prodError
+
+            const inventoryValue = products.reduce((acc, p) => {
+                const stock = p.inventory?.[0]?.stock || 0
+                return acc + (stock * (p.unit_cost || 0))
+            }, 0)
+
+            const { data: salesItemsData, error: itemsErr } = await client
+                .from('salesItems')
+                .select('product_id, unit_cost, quantity, subtotal, products(name)')
+                .in('sale_id', saleIds)
+
+            if (itemsErr) throw itemsErr
+
+            const productAgg = {}
+            for (const item of salesItemsData || []) {
+                const pid = item.product_id
+                if (!productAgg[pid]) {
+                    productAgg[pid] = { name: item.products?.name || 'Producto', totalQuantity: 0, totalRevenue: 0, totalCost: 0 }
+                }
+                productAgg[pid].totalQuantity += item.quantity
+                productAgg[pid].totalRevenue += item.subtotal
+                productAgg[pid].totalCost += (item.unit_cost || 0) * item.quantity
+            }
+
+            const productMargins = Object.entries(productAgg)
+                .map(([id, p]) => ({
+                    id,
+                    name: p.name,
+                    totalQuantity: p.totalQuantity,
+                    totalRevenue: p.totalRevenue,
+                    margin: p.totalRevenue > 0
+                        ? Math.round(((p.totalRevenue - p.totalCost) / p.totalRevenue) * 100)
+                        : 0
+                }))
+                .sort((a, b) => b.margin - a.margin)
+
+            return res.json({
+                section: 'profitability',
+                data: {
+                    dailyProfit,
+                    summary: {
+                        totalRevenue,
+                        totalCost,
+                        totalProfit,
+                        overallMargin,
+                        periodStart: start,
+                        periodEnd: end
+                    },
+                    inventoryValue,
+                    productMargins
+                }
+            })
+        }
+
+        if (section === 'movements') {
+            const { type, startDate: mStart, endDate: mEnd, limit = 100 } = req.query
+
+            let query = client
+                .from('inventory_movements')
+                .select('*, products(name, sku)')
+                .eq('business_id', businessId)
+
+            if (type) query = query.eq('type', type)
+            if (mStart) query = query.gte('created_at', mStart)
+            if (mEnd) query = query.lte('created_at', mEnd)
+
+            const { data, error } = await query
+                .order('created_at', { ascending: false })
+                .limit(parseInt(limit))
+
+            if (error) throw error
+
+            return res.json({
+                section: 'movements',
+                data: data || []
+            })
+        }
+
         if (section === 'sales') {
             const queries = []
 

@@ -47,7 +47,7 @@ export const createSale = async (req, res) => {
 		const productIds = salesItems.map((item) => item.product_id)
 		const { data: products, error: productsError } = await client
 			.from('products')
-			.select('id, name, price, track_stock, inventory(stock)')
+			.select('id, name, price, unit_cost, track_stock, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError)
@@ -79,6 +79,7 @@ export const createSale = async (req, res) => {
 			return {
 				...item,
 				unit_price: product.price,
+				unit_cost: product.unit_cost ?? null,
 				subtotal,
 				track_stock: product.track_stock ?? true,
 			}
@@ -119,6 +120,7 @@ export const createSale = async (req, res) => {
 		if (itemsError) throw new Error(itemsError)
 
 		//Reducir stock de productos vendidos
+		const movements = []
 		for (const item of itemsWithPrices) {
 			const product = products.find((p) => p.id === item.product_id)
 			if (product.track_stock === false) continue
@@ -133,6 +135,24 @@ export const createSale = async (req, res) => {
 				.eq('product_id', item.product_id)
 
 			if (updateStockError) throw new Error(updateStockError)
+
+			movements.push({
+				business_id,
+				product_id: item.product_id,
+				type: 'sale',
+				quantity: item.quantity,
+				unit_cost: item.unit_cost,
+				notes: `Venta #${data.id}`,
+				created_at: localDate
+			})
+		}
+
+		if (movements.length > 0) {
+			const { error: movementsError } = await client
+				.from('inventory_movements')
+				.insert(movements)
+
+			if (movementsError) throw new Error(movementsError)
 		}
 
 		res.status(201).json({ 
@@ -186,6 +206,7 @@ export const returnSale = async (req, res) => {
 		if (originalItemsError) throw new Error(originalItemsError)
 
 		let totalReturnAmount = 0
+		const movements = []
 
 		for (const returnItem of items) {
 			const saleItem = originalSalesItems.find(si => si.product_id === returnItem.product_id)
@@ -222,6 +243,24 @@ export const returnSale = async (req, res) => {
 			if (updateStockError) throw new Error(updateStockError)
 
 			totalReturnAmount += returnItem.subtotal
+
+			movements.push({
+				business_id: business_id || sale.business_id,
+				product_id: returnItem.product_id,
+				type: 'return',
+				quantity: returnItem.quantity,
+				unit_cost: returnItem.unit_cost ?? null,
+				notes: `Devolución venta #${id}`,
+				created_at: localDate
+			})
+		}
+
+		if (movements.length > 0) {
+			const { error: movementsError } = await client
+				.from('inventory_movements')
+				.insert(movements)
+
+			if (movementsError) throw new Error(movementsError)
 		}
 
 		const { data: returnRecord, error: returnError } = await client

@@ -28,6 +28,11 @@ export const authenticate = async (req, res, next) => {
             return res.status(401).json({ error: 'Token inválido o expirado' })
         }
 
+        await supabaseClient.auth.setSession({
+            access_token: token,
+            refresh_token: token,
+        })
+
         req.user = user
         req.supabase = supabaseClient
         next()

@@ -23,7 +23,7 @@ export const getDashboardMetrics = async (req, res) => {
         ] = await Promise.all([
             client
                 .from('salesTickets')
-                .select('total_amount')
+                .select('id, total_amount')
                 .eq('business_id', businessId)
                 .eq('created_at', todayStr)
                 .neq('status', 'returned'),
@@ -34,12 +34,12 @@ export const getDashboardMetrics = async (req, res) => {
                 .eq('is_active', true),
             client
                 .from('products')
-                .select('id, name, inventory(stock, min_stock)')
+                .select('id, name, unit_cost, inventory(stock, min_stock)')
                 .eq('business_id', businessId)
                 .eq('is_active', true),
             client
                 .from('salesTickets')
-                .select('total_amount, created_at')
+                .select('id, total_amount, created_at')
                 .eq('business_id', businessId)
                 .gte('created_at', sevenDaysAgoStr)
                 .neq('status', 'returned')
@@ -65,13 +65,36 @@ export const getDashboardMetrics = async (req, res) => {
         if (recentError) throw recentError
         if (topError) throw topError
 
-        const todaySalesCount = todaySalesData.length
+        const todaySaleIds = todaySalesData.map(s => s.id)
         const todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
+
+        let todayCost = 0
+        if (todaySaleIds.length > 0) {
+            const { data: todayItems, error: itemsError } = await client
+                .from('salesItems')
+                .select('unit_cost, quantity')
+                .in('sale_id', todaySaleIds)
+
+            if (!itemsError) {
+                todayCost = todayItems.reduce((acc, item) => {
+                    return acc + ((item.unit_cost || 0) * item.quantity)
+                }, 0)
+            }
+        }
+
+        const todayProfit = todayRevenue - todayCost
+        const todayMargin = todayRevenue > 0 ? Math.round((todayProfit / todayRevenue) * 100) : 0
 
         const stockAlerts = inventoryData.filter(p => {
             const inv = p.inventory?.[0]
             return inv && inv.stock <= inv.min_stock && inv.min_stock > 0
         }).length
+
+        const inventoryValue = inventoryData.reduce((acc, p) => {
+            const stock = p.inventory?.[0]?.stock || 0
+            const cost = p.unit_cost || 0
+            return acc + (stock * cost)
+        }, 0)
 
         const sortedLowStock = inventoryData
             .filter(p => {
@@ -95,10 +118,14 @@ export const getDashboardMetrics = async (req, res) => {
 
         res.json({
             metrics: {
-                todaySales: todaySalesCount,
+                todaySales: todaySaleIds.length,
                 todayRevenue: todayRevenue,
+                todayCost: todayCost,
+                todayProfit: todayProfit,
+                todayMargin: todayMargin,
                 activeProducts: activeProductsCount,
-                stockAlerts: stockAlerts
+                stockAlerts: stockAlerts,
+                inventoryValue: inventoryValue
             },
             weeklySales: weeklySalesData,
             lowStockItems: sortedLowStock,
