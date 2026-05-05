@@ -19,13 +19,46 @@ export const getSales = async (req, res) => {
 			throw new Error(error.message || JSON.stringify(error))
 		}
 
+		// Build map of returned quantities per (sale_id, product_id)
+		const saleIds = sales.map(s => s.id)
+		const returnedPerProduct = {}
+
+		if (saleIds.length > 0) {
+			const { data: returns } = await client
+				.from('returns')
+				.select('id, sale_id')
+				.in('sale_id', saleIds)
+
+			if (returns && returns.length > 0) {
+				const returnIds = returns.map(r => r.id)
+				const saleOfReturn = {}
+				returns.forEach(r => { saleOfReturn[r.id] = r.sale_id })
+
+				const { data: returnedItems } = await client
+					.from('returns_items')
+					.select('return_id, product_id, quantity')
+					.in('return_id', returnIds)
+
+				if (returnedItems) {
+					returnedItems.forEach(item => {
+						const sid = saleOfReturn[item.return_id]
+						if (!returnedPerProduct[sid]) returnedPerProduct[sid] = {}
+						returnedPerProduct[sid][item.product_id] = (returnedPerProduct[sid][item.product_id] || 0) + item.quantity
+					})
+				}
+			}
+		}
+
 		const formatted = sales.map(s => ({
 			id: s.id,
 			total: s.total_amount,
 			date: s.created_at,
 			paymentMethod: s.payment_method,
 			status: s.status,
-			items: s.items,
+			items: (s.items || []).map(item => ({
+				...item,
+				already_returned: returnedPerProduct[s.id]?.[item.product_id] || 0
+			})),
 			itemsCount: s.items_count
 		}))
 
@@ -229,6 +262,27 @@ export const returnSale = async (req, res) => {
 			throw new Error(originalItemsError.message || JSON.stringify(originalItemsError))
 		}
 
+		// Get already-returned quantities from previous partial returns
+		const { data: previousReturns } = await client
+			.from('returns')
+			.select('id')
+			.eq('sale_id', id)
+
+		const alreadyReturnedMap = {}
+		if (previousReturns && previousReturns.length > 0) {
+			const returnIds = previousReturns.map(r => r.id)
+			const { data: returnedItems } = await client
+				.from('returns_items')
+				.select('product_id, quantity')
+				.in('return_id', returnIds)
+
+			if (returnedItems) {
+				returnedItems.forEach(item => {
+					alreadyReturnedMap[item.product_id] = (alreadyReturnedMap[item.product_id] || 0) + item.quantity
+				})
+			}
+		}
+
 		let totalReturnAmount = 0
 		const movements = []
 
@@ -238,10 +292,18 @@ export const returnSale = async (req, res) => {
 				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado en la venta original` })
 			}
 
-			const maxQty = saleItem.quantity || 0
-			if (returnItem.quantity > maxQty) {
+			const alreadyReturned = alreadyReturnedMap[returnItem.product_id] || 0
+			const availableToReturn = (saleItem.quantity || 0) - alreadyReturned
+
+			if (availableToReturn <= 0) {
 				return res.status(400).json({
-					error: `No puedes devolver más de ${maxQty} unidades del producto`
+					error: `El producto ya fue devuelto completamente`
+				})
+			}
+
+			if (returnItem.quantity > availableToReturn) {
+				return res.status(400).json({
+					error: `Solo puedes devolver hasta ${availableToReturn} unidades de este producto`
 				})
 			}
 
@@ -328,10 +390,11 @@ export const returnSale = async (req, res) => {
 			throw new Error(returnItemsError.message || JSON.stringify(returnItemsError))
 		}
 
-		// Check if all original items were returned
+		// Check if all original items were returned (including previous returns)
 		const allReturned = originalSalesItems.every(orig => {
-			const returned = items.find(r => r.product_id === orig.product_id)
-			return returned && returned.quantity >= orig.quantity
+			const alreadyR = alreadyReturnedMap[orig.product_id] || 0
+			const currentR = items.find(r => r.product_id === orig.product_id)?.quantity || 0
+			return (alreadyR + currentR) >= orig.quantity
 		})
 
 		if (allReturned) {
