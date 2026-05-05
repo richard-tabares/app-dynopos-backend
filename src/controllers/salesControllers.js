@@ -14,7 +14,10 @@ export const getSales = async (req, res) => {
 			.order('id', { ascending: false })
 			.limit(10)
 
-		if (error) throw new Error(error)
+		if (error) {
+			console.error('getSales error:', error)
+			throw new Error(error.message || JSON.stringify(error))
+		}
 
 		const formatted = sales.map(s => ({
 			id: s.id,
@@ -50,7 +53,10 @@ export const createSale = async (req, res) => {
 			.select('id, name, price, unit_cost, track_stock, inventory(stock)')
 			.in('id', productIds)
 
-		if (productsError) throw new Error(productsError)
+		if (productsError) {
+			console.error('Products fetch error:', productsError)
+			throw new Error(productsError.message || JSON.stringify(productsError))
+		}
 
 
 		for (const item of salesItems) {
@@ -79,7 +85,7 @@ export const createSale = async (req, res) => {
 			return {
 				...item,
 				unit_price: product.price,
-				unit_cost: product.unit_cost ?? null,
+				unit_cost: product.unit_cost ?? 0,
 				subtotal,
 				track_stock: product.track_stock ?? true,
 			}
@@ -103,7 +109,10 @@ export const createSale = async (req, res) => {
 			.select()
 			.single()
 
-		if (salesError) throw new Error(salesError)
+		if (salesError) {
+			console.error('SalesTicket insert error:', salesError)
+			throw new Error(salesError.message || JSON.stringify(salesError))
+		}
 		//preparar items de venta con sale_id
 		const itemsToInsert = itemsWithPrices.map((item) => ({
 			...item,
@@ -117,7 +126,10 @@ export const createSale = async (req, res) => {
 			.insert(itemsToInsert)
 			.select()
 
-		if (itemsError) throw new Error(itemsError)
+		if (itemsError) {
+			console.error('SalesItems insert error:', itemsError)
+			throw new Error(itemsError.message || JSON.stringify(itemsError))
+		}
 
 		//Reducir stock de productos vendidos
 		const movements = []
@@ -134,7 +146,10 @@ export const createSale = async (req, res) => {
 				.update({ stock: newStock })
 				.eq('product_id', item.product_id)
 
-			if (updateStockError) throw new Error(updateStockError)
+			if (updateStockError) {
+				console.error('Stock update error:', updateStockError)
+				throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+			}
 
 			movements.push({
 				business_id,
@@ -152,7 +167,10 @@ export const createSale = async (req, res) => {
 				.from('inventory_movements')
 				.insert(movements)
 
-			if (movementsError) throw new Error(movementsError)
+			if (movementsError) {
+				console.error('Inventory movements insert error:', movementsError)
+				throw new Error(movementsError.message || JSON.stringify(movementsError))
+			}
 		}
 
 		res.status(201).json({ 
@@ -192,7 +210,10 @@ export const returnSale = async (req, res) => {
 			.eq('id', id)
 			.single()
 
-		if (saleError) throw new Error(saleError)
+		if (saleError) {
+			console.error('SalesTicket fetch error:', saleError)
+			throw new Error(saleError.message || JSON.stringify(saleError))
+		}
 
 		if (sale.status === 'returned') {
 			return res.status(400).json({ error: 'La venta ya ha sido devuelta' })
@@ -203,7 +224,10 @@ export const returnSale = async (req, res) => {
 			.select('product_id, track_stock, quantity')
 			.eq('sale_id', id)
 
-		if (originalItemsError) throw new Error(originalItemsError)
+		if (originalItemsError) {
+			console.error('SalesItems fetch error:', originalItemsError)
+			throw new Error(originalItemsError.message || JSON.stringify(originalItemsError))
+		}
 
 		let totalReturnAmount = 0
 		const movements = []
@@ -240,7 +264,10 @@ export const returnSale = async (req, res) => {
 				.update({ stock: newStock })
 				.eq('product_id', returnItem.product_id)
 
-			if (updateStockError) throw new Error(updateStockError)
+			if (updateStockError) {
+				console.error('Stock update error during return:', updateStockError)
+				throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+			}
 
 			totalReturnAmount += returnItem.subtotal
 
@@ -249,7 +276,7 @@ export const returnSale = async (req, res) => {
 				product_id: returnItem.product_id,
 				type: 'return',
 				quantity: returnItem.quantity,
-				unit_cost: returnItem.unit_cost ?? null,
+				unit_cost: returnItem.unit_cost ?? 0,
 				notes: `Devolución venta #${id}`,
 				created_at: localDate
 			})
@@ -260,7 +287,10 @@ export const returnSale = async (req, res) => {
 				.from('inventory_movements')
 				.insert(movements)
 
-			if (movementsError) throw new Error(movementsError)
+			if (movementsError) {
+				console.error('Inventory movements insert error during return:', movementsError)
+				throw new Error(movementsError.message || JSON.stringify(movementsError))
+			}
 		}
 
 		const { data: returnRecord, error: returnError } = await client
@@ -275,7 +305,10 @@ export const returnSale = async (req, res) => {
 			.select()
 			.single()
 
-		if (returnError) throw new Error(returnError)
+		if (returnError) {
+			console.error('Returns insert error:', returnError)
+			throw new Error(returnError.message || JSON.stringify(returnError))
+		}
 
 		const returnItems = items.map(item => ({
 			return_id: returnRecord.id,
@@ -290,7 +323,10 @@ export const returnSale = async (req, res) => {
 			.from('returns_items')
 			.insert(returnItems)
 
-		if (returnItemsError) throw new Error(returnItemsError)
+		if (returnItemsError) {
+			console.error('Returns items insert error:', returnItemsError)
+			throw new Error(returnItemsError.message || JSON.stringify(returnItemsError))
+		}
 
 		// Check if all original items were returned
 		const allReturned = originalSalesItems.every(orig => {
@@ -306,7 +342,10 @@ export const returnSale = async (req, res) => {
 				.select()
 				.single()
 
-			if (updateSaleError) throw new Error(updateSaleError)
+			if (updateSaleError) {
+				console.error('Sale status update error:', updateSaleError)
+				throw new Error(updateSaleError.message || JSON.stringify(updateSaleError))
+			}
 
 			return res.status(201).json({
 				status: 201,

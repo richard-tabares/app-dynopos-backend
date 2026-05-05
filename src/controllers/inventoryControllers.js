@@ -22,7 +22,10 @@ export const adjustInventory = async (req, res) => {
             .eq('id', productId)
             .single()
 
-        if (productError) throw new Error(productError)
+        if (productError) {
+            console.error('Product fetch error:', productError)
+            throw new Error(productError.message || JSON.stringify(productError))
+        }
 
         const currentStock = product.inventory?.[0]?.stock || 0
         const newStock = movement_type === 'entry'
@@ -45,7 +48,10 @@ export const adjustInventory = async (req, res) => {
             .update(updateFields)
             .eq('product_id', productId)
 
-        if (updateError) throw new Error(updateError)
+        if (updateError) {
+            console.error('Inventory update error:', updateError)
+            throw new Error(updateError.message || JSON.stringify(updateError))
+        }
 
         const now = new Date()
         const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -57,12 +63,15 @@ export const adjustInventory = async (req, res) => {
                 product_id: productId,
                 type: movement_type,
                 quantity,
-                unit_cost: unit_cost ?? product.unit_cost ?? null,
+                unit_cost: unit_cost ?? product.unit_cost ?? 0,
                 notes: notes || null,
                 created_at: localDate
             })
 
-        if (movementError) throw new Error(movementError)
+        if (movementError) {
+            console.error('inventory_movements insert error:', movementError)
+            throw new Error(movementError.message || JSON.stringify(movementError))
+        }
 
         if (unit_cost !== undefined && unit_cost !== product.unit_cost) {
             const { error: costError } = await client
@@ -70,7 +79,10 @@ export const adjustInventory = async (req, res) => {
                 .update({ unit_cost })
                 .eq('id', productId)
 
-            if (costError) throw new Error(costError)
+            if (costError) {
+                console.error('Product cost update error:', costError)
+                throw new Error(costError.message || JSON.stringify(costError))
+            }
         }
 
         const { data: productData, error: fetchError } = await client
@@ -94,7 +106,10 @@ export const adjustInventory = async (req, res) => {
             .eq('id', productId)
             .single()
 
-        if (fetchError) throw new Error(fetchError)
+        if (fetchError) {
+            console.error('Product fetch error:', fetchError)
+            throw new Error(fetchError.message || JSON.stringify(fetchError))
+        }
 
         res.json({ status: 200, message: 'Inventario Actualizado', data: productData })
     } catch (error) {
@@ -119,7 +134,10 @@ export const getMovements = async (req, res) => {
 
         const { data, error } = await query
 
-        if (error) throw new Error(error)
+        if (error) {
+            console.error('getMovements error:', error)
+            throw new Error(error.message || JSON.stringify(error))
+        }
 
         res.json(data || [])
     } catch (error) {
@@ -148,7 +166,10 @@ export const getAllMovements = async (req, res) => {
 
         const { data, error } = await query
 
-        if (error) throw new Error(error)
+        if (error) {
+            console.error('getAllMovements error:', error)
+            throw new Error(error.message || JSON.stringify(error))
+        }
 
         res.json(data || [])
     } catch (error) {
