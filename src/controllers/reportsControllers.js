@@ -128,6 +128,7 @@ export const getReports = async (req, res) => {
                     name: p.name,
                     totalQuantity: p.totalQuantity,
                     totalRevenue: p.totalRevenue,
+                    totalCost: p.totalCost,
                     margin: p.totalRevenue > 0
                         ? Math.round(((p.totalRevenue - p.totalCost) / p.totalRevenue) * 100)
                         : 0
