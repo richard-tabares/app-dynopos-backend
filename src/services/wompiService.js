@@ -3,7 +3,6 @@ import crypto from 'crypto'
 const WOMPI_API_URL = process.env.WOMPI_API_URL || 'https://sandbox.wompi.co/v1'
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY
 const WOMPI_PRIVATE_KEY = process.env.WOMPI_PRIVATE_KEY
-const WOMPI_INTEGRITY_SECRET = process.env.WOMPI_INTEGRITY_SECRET
 
 const wompiFetch = async (path, options = {}) => {
   const url = `${WOMPI_API_URL}${path}`
@@ -32,19 +31,37 @@ export const getAcceptanceToken = async () => {
 }
 
 export const generateCheckoutUrl = ({ reference, amountInCents, currency = 'COP', customerEmail, redirectUrl }) => {
-  const params = new URLSearchParams({
-    'public-key': WOMPI_PUBLIC_KEY,
-    reference,
-    'amount-in-cents': String(amountInCents),
-    currency,
-    'customer-email': customerEmail,
-  })
+  let query = `currency=${currency}`
+  query += `&public-key=${WOMPI_PUBLIC_KEY}`
+  query += `&amount-in-cents=${amountInCents}`
+  query += `&reference=${reference}`
+  query += `&customer-email=${encodeURIComponent(customerEmail)}`
 
   if (!redirectUrl.includes('localhost')) {
-    params.set('redirect-url', redirectUrl)
+    query += `&redirect-url=${encodeURIComponent(redirectUrl)}`
   }
 
-  return `https://checkout.wompi.co/p/${WOMPI_PUBLIC_KEY}?${params.toString()}`
+  return `https://checkout.wompi.co/p/${WOMPI_PUBLIC_KEY}?${query}`
+}
+
+export const generateSignature = (reference, amountInCents, currency = 'COP') => {
+  const INTEGRITY = process.env.WOMPI_INTEGRITY_SECRET
+  if (!INTEGRITY) return null
+  return crypto
+    .createHash('sha256')
+    .update(`${reference}${amountInCents}${currency}${INTEGRITY}`)
+    .digest('hex')
+}
+
+export const createTransaction = async (body) => {
+  const sig = generateSignature(body.reference, body.amount_in_cents, body.currency)
+  if (sig) body.signature = sig
+
+  const data = await wompiFetch('/transactions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return data.data
 }
 
 export const getTransaction = async (transactionId) => {
@@ -53,10 +70,11 @@ export const getTransaction = async (transactionId) => {
 }
 
 export const verifyWebhookSignature = (body, signature) => {
-  if (!WOMPI_INTEGRITY_SECRET) return true
+  const INTEGRITY = process.env.WOMPI_INTEGRITY_SECRET
+  if (!INTEGRITY) return true
   const expected = crypto
     .createHash('sha256')
-    .update(JSON.stringify(body) + WOMPI_INTEGRITY_SECRET)
+    .update(JSON.stringify(body) + INTEGRITY)
     .digest('hex')
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
 }

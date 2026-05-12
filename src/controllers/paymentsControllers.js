@@ -272,13 +272,144 @@ export const confirmTransfer = async (req, res) => {
   }
 }
 
+export const getAcceptanceTokens = async (req, res) => {
+  const { token } = req.params
+
+  try {
+    const { data: pendingSignup, error } = await serviceRoleSupabase
+      .from('pending_signups')
+      .select('*')
+      .eq('signup_token', token)
+      .eq('status', 'pending')
+      .single()
+
+    if (error || !pendingSignup) {
+      return res.status(404).json({ error: 'Token inválido' })
+    }
+
+    const tokens = await wompiService.getAcceptanceToken()
+
+    return res.json({
+      acceptance_token: tokens.acceptance_token,
+      personal_data_auth: tokens.personal_data_auth,
+      email: pendingSignup.email,
+      phone: pendingSignup.phone,
+      owner_name: pendingSignup.owner_name,
+      business_name: pendingSignup.business_name,
+    })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
+}
+
+export const processCardPayment = async (req, res) => {
+  const {
+    signup_token,
+    card_token,
+    card_last4,
+    acceptance_token,
+    personal_data_auth,
+    customer_email,
+    customer_data,
+    billing_frequency,
+  } = req.body
+
+  if (!signup_token || !card_token || !acceptance_token || !customer_email) {
+    return res.status(400).json({ error: 'Faltan datos obligatorios' })
+  }
+
+  try {
+    const { data: pendingSignup, error: fetchError } = await serviceRoleSupabase
+      .from('pending_signups')
+      .select('*')
+      .eq('signup_token', signup_token)
+      .eq('status', 'pending')
+      .single()
+
+    if (fetchError || !pendingSignup) {
+      return res.status(404).json({ error: 'Token inválido o expirado' })
+    }
+
+    const { data: planData } = await serviceRoleSupabase
+      .from('subscription_plans')
+      .select('*')
+      .eq('status', 'active')
+      .limit(1)
+      .single()
+
+    const amount = billing_frequency === 'annual' ? planData.annual_price : planData.monthly_price
+    const amountInCents = Math.round(amount * 100)
+
+    const reference = wompiService.generateReference()
+
+    const wompiBody = {
+      amount_in_cents: amountInCents,
+      currency: 'COP',
+      customer_email,
+      payment_method: {
+        type: 'CARD',
+        token: card_token,
+        installments: 1,
+      },
+      payment_method_type: 'CARD',
+      reference,
+      acceptance_token,
+      accept_personal_auth: personal_data_auth,
+      ip: req.ip || req.connection?.remoteAddress || '0.0.0.0',
+    }
+
+    const transaction = await wompiService.createTransaction(wompiBody)
+
+    await serviceRoleSupabase
+      .from('pending_signups')
+      .update({
+        payment_method: 'card',
+        billing_frequency,
+      })
+      .eq('signup_token', signup_token)
+
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .insert({
+        reference,
+        pending_signup_id: pendingSignup.id,
+        amount,
+        payment_method: 'card',
+        status: 'approved',
+        wompi_transaction_id: transaction.id,
+        wompi_response: JSON.stringify(transaction),
+        billing_frequency,
+      })
+
+    await activateUser(pendingSignup, transaction.id)
+
+    return res.json({
+      success: true,
+      transaction_id: transaction.id,
+      status: transaction.status,
+      reference,
+      amount,
+      billing_frequency: pendingSignup.billing_frequency,
+      card_last4: card_last4 || null,
+      business_name: pendingSignup.business_name,
+      email: pendingSignup.email,
+      owner_name: pendingSignup.owner_name,
+    })
+  } catch (error) {
+    console.error('processCardPayment error:', error)
+    return res.status(500).json({ error: error.message })
+  }
+}
+
 async function activateUser(pendingSignup, wompiTransactionId = null) {
+  if (pendingSignup.status === 'completed') return
+
   const password = decrypt(pendingSignup.encrypted_password)
 
   const { data: authData, error: authError } = await serviceRoleSupabase.auth.admin.createUser({
     email: pendingSignup.email,
     password,
-    email_confirm: true,
+    email_confirm: false,
   })
 
   if (authError) throw new Error(`Error creating auth user: ${authError.message}`)

@@ -5,6 +5,8 @@ import {
   webhook,
   checkPaymentStatus,
   confirmTransfer,
+  getAcceptanceTokens,
+  processCardPayment,
 } from '../controllers/paymentsControllers.js'
 import { authenticate } from '../middleware/authenticate.js'
 
@@ -15,5 +17,7 @@ router.post('/create-checkout', createCheckout)
 router.post('/webhook', webhook)
 router.get('/status/:token', checkPaymentStatus)
 router.post('/confirm-transfer', authenticate, confirmTransfer)
+router.get('/acceptance-tokens/:token', getAcceptanceTokens)
+router.post('/process-card', processCardPayment)
 
 export default router
