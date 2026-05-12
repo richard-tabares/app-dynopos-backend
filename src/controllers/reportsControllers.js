@@ -275,7 +275,7 @@ export const getReports = async (req, res) => {
             if (start) query = query.gte('created_at', start)
             if (end) query = query.lte('created_at', end)
 
-            const { data, error } = await query.order('id', { ascending: false }).limit(50)
+            const { data, error } = await query.order('created_at', { ascending: false }).limit(50)
             if (error) throw error
 
             return res.json({

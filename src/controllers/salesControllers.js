@@ -11,7 +11,7 @@ export const getSales = async (req, res) => {
 			.from('vw_sales_history')
 			.select('*')
 			.eq('business_id', businessId)
-			.order('id', { ascending: false })
+			.order('created_at', { ascending: false })
 			.limit(10)
 
 		if (error) {
@@ -51,6 +51,7 @@ export const getSales = async (req, res) => {
 
 		const formatted = sales.map(s => ({
 			id: s.id,
+			ticketNumber: s.ticket_number,
 			total: s.total_amount,
 			date: s.created_at,
 			paymentMethod: s.payment_method,
@@ -70,7 +71,7 @@ export const getSales = async (req, res) => {
 
 export const createSale = async (req, res) => {
 	const client = getClient(req)
-	const { business_id, payment_method, status, salesItems } =
+	let { business_id, payment_method, status, salesItems } =
 		req.body
 
 	try {
@@ -79,6 +80,9 @@ export const createSale = async (req, res) => {
 				.status(400)
 				.json({ error: 'No se proporcionaron items de venta' })
 		}
+
+		// Normalize product_id to string (UUID safety)
+		salesItems = salesItems.map(item => ({ ...item, product_id: String(item.product_id) }))
 
 		const productIds = salesItems.map((item) => item.product_id)
 		const { data: products, error: productsError } = await client
@@ -128,6 +132,16 @@ export const createSale = async (req, res) => {
 		const now = new Date()
 		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
+		// Obtener siguiente ticket_number (atómico por negocio)
+		const { data: ticketData, error: ticketError } = await client
+			.rpc('get_next_ticket', { p_business_id: business_id })
+			.single()
+
+		if (ticketError) {
+			console.error('get_next_ticket error:', ticketError)
+			throw new Error(ticketError.message || JSON.stringify(ticketError))
+		}
+
 		const { data, error: salesError } = await client
 			.from('salesTickets')
 			.insert([
@@ -136,6 +150,7 @@ export const createSale = async (req, res) => {
 					payment_method,
 					status,
 					total_amount,
+					ticket_number: ticketData.get_next_ticket,
 					created_at: localDate,
 				},
 			])
@@ -190,7 +205,7 @@ export const createSale = async (req, res) => {
 				type: 'sale',
 				quantity: item.quantity,
 				unit_cost: item.unit_cost,
-				notes: `Venta #${data.id}`,
+				notes: `Venta #${data.ticket_number}`,
 				created_at: localDate
 			})
 		}
@@ -239,7 +254,7 @@ export const returnSale = async (req, res) => {
 
 		const { data: sale, error: saleError } = await client
 			.from('salesTickets')
-			.select('id, total_amount, status, business_id')
+			.select('id, total_amount, status, business_id, ticket_number')
 			.eq('id', id)
 			.single()
 
@@ -339,7 +354,7 @@ export const returnSale = async (req, res) => {
 				type: 'return',
 				quantity: returnItem.quantity,
 				unit_cost: returnItem.unit_cost ?? 0,
-				notes: `Devolución venta #${id}`,
+				notes: `Devolución venta #${sale.ticket_number}`,
 				created_at: localDate
 			})
 		}

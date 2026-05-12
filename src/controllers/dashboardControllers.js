@@ -48,7 +48,7 @@ export const getDashboardMetrics = async (req, res) => {
                 .from('vw_sales_history')
                 .select('*')
                 .eq('business_id', businessId)
-                .order('id', { ascending: false })
+                .order('created_at', { ascending: false })
                 .limit(10),
             client
                 .from('vw_top_products')

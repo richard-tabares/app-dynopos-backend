@@ -9,6 +9,7 @@ export const getProducts = async (req, res) => {
         .select(
             `id,
             business_id,
+            created_at,
             name,
             sku,
             price,
@@ -36,6 +37,7 @@ export const getProductById = async (req, res) => {
         .select(
             `id,
             business_id,
+            created_at,
             name,
             sku,
             price,
@@ -80,6 +82,7 @@ export const createProduct = async (req, res) => {
             .select(
                 `id,
                 business_id,
+                created_at,
                 name,
                 sku,
                 price,
@@ -130,6 +133,7 @@ export const updateProduct = async (req, res) => {
             .select(
                 `id,
                 business_id,
+                created_at,
                 name,
                 sku,
                 price,
