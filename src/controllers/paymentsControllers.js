@@ -414,6 +414,15 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
 
   if (authError) throw new Error(`Error creating auth user: ${authError.message}`)
 
+  const { error: linkError } = await serviceRoleSupabase.auth.admin.generateLink({
+    type: 'signup',
+    email: pendingSignup.email,
+    options: {
+      redirectTo: `${FRONTEND_URL}/emailConfirmation/success`,
+    },
+  })
+  if (linkError) throw new Error(`Error sending confirmation email: ${linkError.message}`)
+
   const userId = authData.user.id
 
   const { error: profileError } = await serviceRoleSupabase.from('profiles').insert({
