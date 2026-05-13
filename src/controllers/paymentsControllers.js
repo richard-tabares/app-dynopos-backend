@@ -24,7 +24,6 @@ export const initSignup = async (req, res) => {
     const acceptanceTokens = await wompiService.getAcceptanceToken()
 
     const encryptedPassword = encrypt(password)
-    const billingFrequency = 'monthly'
 
     const { data: planData } = await serviceRoleSupabase
       .from('subscription_plans')
@@ -43,7 +42,6 @@ export const initSignup = async (req, res) => {
         email,
         phone,
         encrypted_password: encryptedPassword,
-        billing_frequency: billingFrequency,
       })
       .select()
       .single()
@@ -51,7 +49,8 @@ export const initSignup = async (req, res) => {
     if (error) throw new Error(error.message)
 
     return res.json({
-      signup_token: pendingSignup.signup_token,
+      id: pendingSignup.id,
+      encrypted_password: encryptedPassword,
       acceptance_token: acceptanceTokens.acceptance_token,
       personal_data_auth: acceptanceTokens.personal_data_auth,
       plan: {
@@ -69,9 +68,9 @@ export const initSignup = async (req, res) => {
 }
 
 export const createCheckout = async (req, res) => {
-  const { signup_token, billing_frequency, payment_method } = req.body
+  const { pending_signup_id, billing_frequency, payment_method } = req.body
 
-  if (!signup_token || !billing_frequency || !payment_method) {
+  if (!pending_signup_id || !billing_frequency || !payment_method) {
     return res.status(400).json({ error: 'Faltan datos obligatorios' })
   }
 
@@ -87,12 +86,12 @@ export const createCheckout = async (req, res) => {
     const { data: pendingSignup, error: fetchError } = await serviceRoleSupabase
       .from('pending_signups')
       .select('*')
-      .eq('signup_token', signup_token)
+      .eq('id', pending_signup_id)
       .eq('status', 'pending')
       .single()
 
     if (fetchError || !pendingSignup) {
-      return res.status(404).json({ error: 'Token inválido o expirado' })
+      return res.status(404).json({ error: 'Registro no encontrado o expirado' })
     }
 
     const { data: planData } = await serviceRoleSupabase
@@ -107,7 +106,7 @@ export const createCheckout = async (req, res) => {
 
     const reference = wompiService.generateReference()
 
-    const redirectUrl = `${FRONTEND_URL}/signup/pending?token=${signup_token}`
+    const redirectUrl = `${FRONTEND_URL}/signup/pending?id=${pending_signup_id}`
 
     let checkoutUrl = null
     if (payment_method !== 'transfer') {
@@ -126,7 +125,7 @@ export const createCheckout = async (req, res) => {
         payment_method,
         billing_frequency,
       })
-      .eq('signup_token', signup_token)
+      .eq('id', pending_signup_id)
 
     const { error: txError } = await serviceRoleSupabase
       .from('payment_transactions')
@@ -146,6 +145,7 @@ export const createCheckout = async (req, res) => {
       amount,
       checkout_url: checkoutUrl,
       payment_method,
+      pending_signup_id: pendingSignup.id,
     }
 
     if (payment_method === 'transfer') {
@@ -217,17 +217,17 @@ export const webhook = async (req, res) => {
 }
 
 export const checkPaymentStatus = async (req, res) => {
-  const { token } = req.params
+  const { id } = req.params
 
   try {
     const { data: pendingSignup, error } = await serviceRoleSupabase
       .from('pending_signups')
       .select('*, payment_transactions(*)')
-      .eq('signup_token', token)
+      .eq('id', id)
       .single()
 
     if (error || !pendingSignup) {
-      return res.status(404).json({ error: 'Token inválido' })
+      return res.status(404).json({ error: 'Registro no encontrado' })
     }
 
     const transactions = pendingSignup.payment_transactions || []
@@ -236,8 +236,8 @@ export const checkPaymentStatus = async (req, res) => {
     return res.json({
       status: pendingSignup.status,
       transaction_status: latestTx?.status || null,
-      payment_method: pendingSignup.payment_method,
-      billing_frequency: pendingSignup.billing_frequency,
+      payment_method: latestTx?.payment_method || null,
+      billing_frequency: latestTx?.billing_frequency || null,
     })
   } catch (error) {
     return res.status(500).json({ error: error.message })
@@ -245,26 +245,30 @@ export const checkPaymentStatus = async (req, res) => {
 }
 
 export const confirmTransfer = async (req, res) => {
-  const { signup_token } = req.body
+  const { payment_transaction_id } = req.body
 
-  if (!signup_token) {
-    return res.status(400).json({ error: 'Token requerido' })
+  if (!payment_transaction_id) {
+    return res.status(400).json({ error: 'ID de transacción requerido' })
   }
 
   try {
-    const { data: pendingSignup, error: fetchError } = await serviceRoleSupabase
-      .from('pending_signups')
-      .select('*')
-      .eq('signup_token', signup_token)
+    const { data: tx, error: txError } = await serviceRoleSupabase
+      .from('payment_transactions')
+      .select('*, pending_signups!inner(*)')
+      .eq('id', payment_transaction_id)
       .eq('status', 'pending')
-      .eq('payment_method', 'transfer')
       .single()
 
-    if (fetchError || !pendingSignup) {
-      return res.status(404).json({ error: 'Solicitud no encontrada o ya procesada' })
+    if (txError || !tx) {
+      return res.status(404).json({ error: 'Transacción no encontrada o ya procesada' })
     }
 
-    await activateUser(pendingSignup)
+    await activateUser(tx.pending_signups, tx.wompi_transaction_id)
+
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .update({ status: 'approved', updated_at: new Date() })
+      .eq('id', payment_transaction_id)
 
     return res.json({ message: 'Cuenta activada exitosamente' })
   } catch (error) {
@@ -273,18 +277,18 @@ export const confirmTransfer = async (req, res) => {
 }
 
 export const getAcceptanceTokens = async (req, res) => {
-  const { token } = req.params
+  const { id } = req.params
 
   try {
     const { data: pendingSignup, error } = await serviceRoleSupabase
       .from('pending_signups')
       .select('*')
-      .eq('signup_token', token)
+      .eq('id', id)
       .eq('status', 'pending')
       .single()
 
     if (error || !pendingSignup) {
-      return res.status(404).json({ error: 'Token inválido' })
+      return res.status(404).json({ error: 'Registro no encontrado' })
     }
 
     const tokens = await wompiService.getAcceptanceToken()
@@ -304,17 +308,16 @@ export const getAcceptanceTokens = async (req, res) => {
 
 export const processCardPayment = async (req, res) => {
   const {
-    signup_token,
+    pending_signup_id,
     card_token,
     card_last4,
     acceptance_token,
     personal_data_auth,
     customer_email,
-    customer_data,
     billing_frequency,
   } = req.body
 
-  if (!signup_token || !card_token || !acceptance_token || !customer_email) {
+  if (!pending_signup_id || !card_token || !acceptance_token || !customer_email) {
     return res.status(400).json({ error: 'Faltan datos obligatorios' })
   }
 
@@ -322,12 +325,12 @@ export const processCardPayment = async (req, res) => {
     const { data: pendingSignup, error: fetchError } = await serviceRoleSupabase
       .from('pending_signups')
       .select('*')
-      .eq('signup_token', signup_token)
+      .eq('id', pending_signup_id)
       .eq('status', 'pending')
       .single()
 
     if (fetchError || !pendingSignup) {
-      return res.status(404).json({ error: 'Token inválido o expirado' })
+      return res.status(404).json({ error: 'Registro no encontrado o expirado' })
     }
 
     const { data: planData } = await serviceRoleSupabase
@@ -397,14 +400,6 @@ export const processCardPayment = async (req, res) => {
     }
 
     await serviceRoleSupabase
-      .from('pending_signups')
-      .update({
-        payment_method: 'card',
-        billing_frequency,
-      })
-      .eq('signup_token', signup_token)
-
-    await serviceRoleSupabase
       .from('payment_transactions')
       .insert({
         reference,
@@ -425,7 +420,7 @@ export const processCardPayment = async (req, res) => {
       status: txStatus,
       reference,
       amount,
-      billing_frequency: pendingSignup.billing_frequency,
+      billing_frequency: billing_frequency || 'monthly',
       card_last4: card_last4 || null,
       business_name: pendingSignup.business_name,
       email: pendingSignup.email,
@@ -440,6 +435,13 @@ export const processCardPayment = async (req, res) => {
 async function activateUser(pendingSignup, wompiTransactionId = null) {
   if (pendingSignup.status === 'completed') return
 
+  const { data: txData } = await serviceRoleSupabase
+    .from('payment_transactions')
+    .select('billing_frequency')
+    .eq('wompi_transaction_id', wompiTransactionId)
+    .maybeSingle()
+
+  const billingFrequency = txData?.billing_frequency || 'monthly'
   const password = decrypt(pendingSignup.encrypted_password)
 
   const { data: authData, error: authError } = await serviceRoleSupabase.auth.admin.createUser({
@@ -518,7 +520,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
 
   const now = new Date()
   const periodEnd = new Date(now)
-  if (pendingSignup.billing_frequency === 'annual') {
+  if (billingFrequency === 'annual') {
     periodEnd.setFullYear(periodEnd.getFullYear() + 1)
   } else {
     periodEnd.setMonth(periodEnd.getMonth() + 1)
@@ -535,7 +537,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
     business_id: userId,
     plan_id: planData?.id,
     status: 'active',
-    billing_frequency: pendingSignup.billing_frequency,
+    billing_frequency: billingFrequency,
     current_period_start: now.toISOString().split('T')[0],
     current_period_end: periodEnd.toISOString().split('T')[0],
     wompi_transaction_id: wompiTransactionId,

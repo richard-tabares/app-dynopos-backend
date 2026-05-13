@@ -15,9 +15,9 @@ const router = Router()
 router.post('/init-signup', initSignup)
 router.post('/create-checkout', createCheckout)
 router.post('/webhook', webhook)
-router.get('/status/:token', checkPaymentStatus)
+router.get('/status/:id', checkPaymentStatus)
 router.post('/confirm-transfer', authenticate, confirmTransfer)
-router.get('/acceptance-tokens/:token', getAcceptanceTokens)
+router.get('/acceptance-tokens/:id', getAcceptanceTokens)
 router.post('/process-card', processCardPayment)
 
 export default router
