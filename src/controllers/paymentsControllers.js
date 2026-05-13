@@ -360,6 +360,42 @@ export const processCardPayment = async (req, res) => {
 
     const transaction = await wompiService.createTransaction(wompiBody)
 
+    let txStatus = transaction.status
+    let txId = transaction.id
+
+    if (txStatus === 'PENDING') {
+      const MAX_RETRIES = 10
+      let retries = 0
+      while (txStatus === 'PENDING' && retries < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 3000))
+        const updated = await wompiService.getTransaction(txId)
+        txStatus = updated.status
+        txId = updated.id
+        retries++
+      }
+    }
+
+    if (txStatus !== 'APPROVED') {
+      await serviceRoleSupabase
+        .from('payment_transactions')
+        .insert({
+          reference,
+          pending_signup_id: pendingSignup.id,
+          amount,
+          payment_method: 'card',
+          status: 'declined',
+          wompi_transaction_id: txId,
+          wompi_response: JSON.stringify(transaction),
+          billing_frequency,
+        })
+
+      const errorMsg = txStatus === 'PENDING'
+        ? 'La transacción está pendiente. Vuelve a intentarlo más tarde.'
+        : (transaction.status_message || 'La transacción fue rechazada')
+
+      return res.status(400).json({ success: false, error: errorMsg })
+    }
+
     await serviceRoleSupabase
       .from('pending_signups')
       .update({
@@ -376,17 +412,17 @@ export const processCardPayment = async (req, res) => {
         amount,
         payment_method: 'card',
         status: 'approved',
-        wompi_transaction_id: transaction.id,
+        wompi_transaction_id: txId,
         wompi_response: JSON.stringify(transaction),
         billing_frequency,
       })
 
-    await activateUser(pendingSignup, transaction.id)
+    await activateUser(pendingSignup, txId)
 
     return res.json({
       success: true,
-      transaction_id: transaction.id,
-      status: transaction.status,
+      transaction_id: txId,
+      status: txStatus,
       reference,
       amount,
       billing_frequency: pendingSignup.billing_frequency,
