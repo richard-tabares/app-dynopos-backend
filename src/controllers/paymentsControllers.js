@@ -414,14 +414,47 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
 
   if (authError) throw new Error(`Error creating auth user: ${authError.message}`)
 
-  const { error: linkError } = await serviceRoleSupabase.auth.admin.generateLink({
+  const { data: linkData, error: linkError } = await serviceRoleSupabase.auth.admin.generateLink({
     type: 'signup',
     email: pendingSignup.email,
     options: {
       redirectTo: `${FRONTEND_URL}/emailConfirmation/success`,
     },
   })
-  if (linkError) throw new Error(`Error sending confirmation email: ${linkError.message}`)
+  if (linkError) throw new Error(`Error generating confirmation link: ${linkError.message}`)
+
+  const confirmLink = linkData?.properties?.action_link
+  const RESEND_API_KEY = process.env.RESEND_API_KEY
+
+  if (RESEND_API_KEY && confirmLink) {
+    try {
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'DynoPOS <onboarding@resend.dev>',
+          to: pendingSignup.email,
+          subject: 'Confirma tu cuenta DynoPOS',
+          html: `
+            <h2>¡Bienvenido a DynoPOS!</h2>
+            <p>Tu pago fue exitoso y tu cuenta ha sido creada.</p>
+            <p>Haz clic en el siguiente enlace para confirmar tu correo electrónico:</p>
+            <p><a href="${confirmLink}" style="display:inline-block;padding:12px 24px;background:#0284c7;color:#fff;text-decoration:none;border-radius:6px;">Confirmar mi cuenta</a></p>
+            <p>O copia este enlace en tu navegador:</p>
+            <p>${confirmLink}</p>
+            <p>Tu correo: ${pendingSignup.email}</p>
+            <br>
+            <p>Equipo DynoPOS</p>
+          `,
+        }),
+      })
+    } catch (emailError) {
+      console.error('Error sending confirmation email via Resend:', emailError)
+    }
+  }
 
   const userId = authData.user.id
 
