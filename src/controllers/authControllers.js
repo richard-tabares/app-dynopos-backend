@@ -131,6 +131,19 @@ export const signup = async (req, res) => {
     }
 }
 
+export const checkEmail = async (req, res) => {
+    const { email } = req.params
+    if (!email) {
+        return res.status(400).json({ error: 'Email requerido' })
+    }
+    try {
+        const { data } = await serviceRoleSupabase.auth.admin.getUserByEmail(email)
+        return res.json({ exists: !!data?.user })
+    } catch {
+        return res.json({ exists: false })
+    }
+}
+
 export const forgotPassword = async (req, res) => {
     const { email } = req.body
     try {
