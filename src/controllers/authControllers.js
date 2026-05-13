@@ -133,12 +133,15 @@ export const signup = async (req, res) => {
 
 export const checkEmail = async (req, res) => {
     const { email } = req.params
-    if (!email) {
-        return res.status(400).json({ error: 'Email requerido' })
-    }
+    if (!email) return res.status(400).json({ error: 'Email requerido' })
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate')
     try {
-        const { data } = await serviceRoleSupabase.auth.admin.getUserByEmail(email)
-        return res.json({ exists: !!data?.user })
+        const { data } = await serviceRoleSupabase
+            .from('businesses')
+            .select('email')
+            .eq('email', email)
+            .maybeSingle()
+        return res.json({ exists: !!data })
     } catch {
         return res.json({ exists: false })
     }
