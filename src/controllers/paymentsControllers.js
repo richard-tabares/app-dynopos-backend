@@ -78,7 +78,7 @@ export const createCheckout = async (req, res) => {
     return res.status(400).json({ error: 'Frecuencia inválida' })
   }
 
-  if (!['card', 'pse', 'transfer'].includes(payment_method)) {
+  if (!['card', 'pse'].includes(payment_method)) {
     return res.status(400).json({ error: 'Método de pago inválido' })
   }
 
@@ -108,16 +108,13 @@ export const createCheckout = async (req, res) => {
 
     const redirectUrl = `${FRONTEND_URL}/signup/pending?id=${pending_signup_id}`
 
-    let checkoutUrl = null
-    if (payment_method !== 'transfer') {
-      checkoutUrl = wompiService.generateCheckoutUrl({
-        reference,
-        amountInCents,
-        currency: 'COP',
-        customerEmail: pendingSignup.email,
-        redirectUrl,
-      })
-    }
+    const checkoutUrl = wompiService.generateCheckoutUrl({
+      reference,
+      amountInCents,
+      currency: 'COP',
+      customerEmail: pendingSignup.email,
+      redirectUrl,
+    })
 
     await serviceRoleSupabase
       .from('pending_signups')
@@ -146,17 +143,6 @@ export const createCheckout = async (req, res) => {
       checkout_url: checkoutUrl,
       payment_method,
       pending_signup_id: pendingSignup.id,
-    }
-
-    if (payment_method === 'transfer') {
-      response.bank_info = {
-        bank: 'Bancolombia',
-        account_type: 'Ahorros',
-        account_number: '000-000000-00',
-        holder: 'DynoPOS SAS',
-        nit: '123.456.789-0',
-        notes: `Referencia: ${reference}. Enviar comprobante de pago para activación.`,
-      }
     }
 
     return res.json(response)
