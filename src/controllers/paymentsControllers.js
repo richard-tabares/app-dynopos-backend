@@ -167,7 +167,6 @@ export const webhook = async (req, res) => {
     if (!transaction) {
       return res.status(400).json({ error: 'Datos de transacción inválidos' })
     }
-    console.log(transaction.reference)
     const { data: pendingTx, error: txError } = await serviceRoleSupabase
       .from('payment_transactions')
       .select('*, pending_signups!inner(*)')
@@ -190,7 +189,7 @@ export const webhook = async (req, res) => {
       })
       .eq('reference', transaction.reference)
 
-    if (transaction.status === 'APPROVED') {
+    if (transaction.status === 'APPROVED' && pendingTx.payment_method !== 'card') {
       await activateUser(pendingTx.pending_signups, transaction.id)
     }
 
