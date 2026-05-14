@@ -468,37 +468,6 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
   if (linkError) throw new Error(`Error generating confirmation link: ${linkError.message}`)
 
   const confirmLink = linkData?.properties?.action_link
-  const RESEND_API_KEY = process.env.RESEND_API_KEY
-
-  if (RESEND_API_KEY && confirmLink) {
-    try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: 'DynoPOS <onboarding@resend.dev>',
-          to: pendingSignup.email,
-          subject: 'Confirma tu cuenta DynoPOS',
-          html: `
-            <h2>¡Bienvenido a DynoPOS!</h2>
-            <p>Tu pago fue exitoso y tu cuenta ha sido creada.</p>
-            <p>Haz clic en el siguiente enlace para confirmar tu correo electrónico:</p>
-            <p><a href="${confirmLink}" style="display:inline-block;padding:12px 24px;background:#0284c7;color:#fff;text-decoration:none;border-radius:6px;">Confirmar mi cuenta</a></p>
-            <p>O copia este enlace en tu navegador:</p>
-            <p>${confirmLink}</p>
-            <p>Tu correo: ${pendingSignup.email}</p>
-            <br>
-            <p>Equipo DynoPOS</p>
-          `,
-        }),
-      })
-    } catch (emailError) {
-      console.error('Error sending confirmation email via Resend:', emailError)
-    }
-  }
 
   const userId = authData.user.id
 
@@ -561,4 +530,33 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
     .from('payment_transactions')
     .update({ business_id: userId, status: 'approved', updated_at: new Date() })
     .eq('pending_signup_id', pendingSignup.id)
+
+  if (confirmLink) {
+    const RESEND_API_KEY = process.env.RESEND_API_KEY
+    if (RESEND_API_KEY) {
+      fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'DynoPOS <onboarding@resend.dev>',
+          to: pendingSignup.email,
+          subject: 'Confirma tu cuenta DynoPOS',
+          html: `
+            <h2>¡Bienvenido a DynoPOS!</h2>
+            <p>Tu pago fue exitoso y tu cuenta ha sido creada.</p>
+            <p>Haz clic en el siguiente enlace para confirmar tu correo electrónico:</p>
+            <p><a href="${confirmLink}" style="display:inline-block;padding:12px 24px;background:#0284c7;color:#fff;text-decoration:none;border-radius:6px;">Confirmar mi cuenta</a></p>
+            <p>O copia este enlace en tu navegador:</p>
+            <p>${confirmLink}</p>
+            <p>Tu correo: ${pendingSignup.email}</p>
+            <br>
+            <p>Equipo DynoPOS</p>
+          `,
+        }),
+      }).catch(err => console.error('Error sending confirmation email via Resend:', err))
+    }
+  }
 }
