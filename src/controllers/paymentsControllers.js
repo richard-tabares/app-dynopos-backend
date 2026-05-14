@@ -442,7 +442,21 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
     email_confirm: false,
   })
 
-  if (authError) throw new Error(`Error creating auth user: ${authError.message}`)
+  if (authError) {
+    const { data: biz } = await serviceRoleSupabase
+      .from('businesses')
+      .select('id')
+      .eq('email', pendingSignup.email)
+      .maybeSingle()
+    if (biz) {
+      await serviceRoleSupabase
+        .from('pending_signups')
+        .update({ status: 'completed' })
+        .eq('id', pendingSignup.id)
+      return
+    }
+    throw new Error(`Error creating auth user: ${authError.message}`)
+  }
 
   const { data: linkData, error: linkError } = await serviceRoleSupabase.auth.admin.generateLink({
     type: 'signup',
