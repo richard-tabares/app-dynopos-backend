@@ -58,7 +58,6 @@ export const initSignup = async (req, res) => {
         name: plan.name,
         description: plan.description,
         monthly_price: plan.monthly_price,
-        annual_price: plan.annual_price,
         features: plan.features,
       },
     })
@@ -74,7 +73,7 @@ export const createCheckout = async (req, res) => {
     return res.status(400).json({ error: 'Faltan datos obligatorios' })
   }
 
-  if (!['monthly', 'annual'].includes(billing_frequency)) {
+  if (!['monthly', 'quarterly', 'annual'].includes(billing_frequency)) {
     return res.status(400).json({ error: 'Frecuencia inválida' })
   }
 
@@ -96,12 +95,12 @@ export const createCheckout = async (req, res) => {
 
     const { data: planData } = await serviceRoleSupabase
       .from('subscription_plans')
-      .select('*')
+      .select('monthly_price')
       .eq('status', 'active')
       .limit(1)
       .single()
 
-    const amount = billing_frequency === 'annual' ? planData.annual_price : planData.monthly_price
+    const amount = calculateAmount(planData.monthly_price, billing_frequency)
     const amountInCents = Math.round(amount * 100)
 
     const reference = wompiService.generateReference()
@@ -320,12 +319,12 @@ export const processCardPayment = async (req, res) => {
 
     const { data: planData } = await serviceRoleSupabase
       .from('subscription_plans')
-      .select('*')
+      .select('monthly_price')
       .eq('status', 'active')
       .limit(1)
       .single()
 
-    const amount = billing_frequency === 'annual' ? planData.annual_price : planData.monthly_price
+    const amount = calculateAmount(planData.monthly_price, billing_frequency)
     const amountInCents = Math.round(amount * 100)
 
     const reference = wompiService.generateReference()
@@ -415,6 +414,12 @@ export const processCardPayment = async (req, res) => {
     console.error('processCardPayment error:', error)
     return res.status(500).json({ error: error.message })
   }
+}
+
+const calculateAmount = (monthlyPrice, billingFrequency) => {
+  if (billingFrequency === 'annual') return Math.round(monthlyPrice * 12 * 0.9)
+  if (billingFrequency === 'quarterly') return monthlyPrice * 3
+  return monthlyPrice
 }
 
 async function activateUser(pendingSignup, wompiTransactionId = null) {
@@ -507,6 +512,8 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
   const periodEnd = new Date(now)
   if (billingFrequency === 'annual') {
     periodEnd.setFullYear(periodEnd.getFullYear() + 1)
+  } else if (billingFrequency === 'quarterly') {
+    periodEnd.setMonth(periodEnd.getMonth() + 3)
   } else {
     periodEnd.setMonth(periodEnd.getMonth() + 1)
   }
