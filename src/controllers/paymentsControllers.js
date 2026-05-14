@@ -169,7 +169,7 @@ export const webhook = async (req, res) => {
     }
     const { data: pendingTx, error: txError } = await serviceRoleSupabase
       .from('payment_transactions')
-      .select('*, pending_signups!inner(*)')
+      .select('*, pending_signups(*)')
       .eq('reference', transaction.reference)
       .single()
 
@@ -189,8 +189,27 @@ export const webhook = async (req, res) => {
       })
       .eq('reference', transaction.reference)
 
-    if (transaction.status === 'APPROVED' && pendingTx.payment_method !== 'card') {
-      await activateUser(pendingTx.pending_signups, transaction.id)
+    if (transaction.status === 'APPROVED') {
+      if (pendingTx.pending_signups) {
+        if (pendingTx.payment_method !== 'card') {
+          await activateUser(pendingTx.pending_signups, transaction.id)
+        }
+      } else if (pendingTx.business_id) {
+        const { data: sub } = await serviceRoleSupabase
+          .from('subscriptions')
+          .select('*')
+          .eq('business_id', pendingTx.business_id)
+          .eq('status', 'active')
+          .single()
+
+        if (sub) {
+          const newEnd = addPeriod(sub.current_period_end, sub.billing_frequency)
+          await serviceRoleSupabase
+            .from('subscriptions')
+            .update({ current_period_end: newEnd, updated_at: new Date() })
+            .eq('id', sub.id)
+        }
+      }
     }
 
     return res.status(200).json({ message: 'Webhook processed' })
@@ -247,7 +266,7 @@ export const confirmTransfer = async (req, res) => {
       return res.status(404).json({ error: 'Transacción no encontrada o ya procesada' })
     }
 
-    await activateUser(tx.pending_signups, tx.wompi_transaction_id)
+    await activateUser(tx.pending_signups, tx.wompi_transaction_id, null)
 
     await serviceRoleSupabase
       .from('payment_transactions')
@@ -339,13 +358,23 @@ export const processCardPayment = async (req, res) => {
         billing_frequency,
       })
 
+    const paymentSource = await wompiService.createPaymentSource({
+      type: 'CARD',
+      token: card_token,
+      customer_email,
+      acceptance_token,
+    })
+    const paymentSourceId = String(paymentSource.id)
+
     const wompiBody = {
       amount_in_cents: amountInCents,
       currency: 'COP',
       customer_email,
+      recurrent: true,
+      payment_source_id: paymentSource.id,
       payment_method: {
         type: 'CARD',
-        token: card_token,
+        token: paymentSourceId,
         installments: 1,
       },
       payment_method_type: 'CARD',
@@ -392,7 +421,7 @@ export const processCardPayment = async (req, res) => {
       return res.status(400).json({ success: false, error: errorMsg })
     }
 
-    await activateUser(pendingSignup, txId)
+    await activateUser(pendingSignup, txId, paymentSourceId)
 
     return res.json({
       success: true,
@@ -418,7 +447,15 @@ const calculateAmount = (monthlyPrice, billingFrequency) => {
   return monthlyPrice
 }
 
-async function activateUser(pendingSignup, wompiTransactionId = null) {
+const addPeriod = (date, frequency) => {
+  const d = new Date(date)
+  if (frequency === 'annual') d.setFullYear(d.getFullYear() + 1)
+  else if (frequency === 'quarterly') d.setMonth(d.getMonth() + 3)
+  else d.setMonth(d.getMonth() + 1)
+  return d.toISOString().split('T')[0]
+}
+
+async function activateUser(pendingSignup, wompiTransactionId = null, paymentSourceId = null) {
   const { data: existing } = await serviceRoleSupabase
     .from('businesses')
     .select('id')
@@ -517,6 +554,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null) {
     current_period_start: now.toISOString().split('T')[0],
     current_period_end: periodEnd.toISOString().split('T')[0],
     wompi_transaction_id: wompiTransactionId,
+    wompi_payment_source_id: paymentSourceId,
   })
   if (subError) throw new Error(`Error creating subscription: ${subError.message}`)
 

@@ -79,6 +79,14 @@ export const verifyWebhookSignature = (body, signature) => {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))
 }
 
+export const createPaymentSource = async ({ type, token, customer_email, acceptance_token }) => {
+  const data = await wompiFetch('/payment_sources', {
+    method: 'POST',
+    body: JSON.stringify({ type, token, customer_email, acceptance_token }),
+  })
+  return data.data
+}
+
 export const generateReference = () => {
   return `DYNOPOS-${crypto.randomUUID()}`
 }
