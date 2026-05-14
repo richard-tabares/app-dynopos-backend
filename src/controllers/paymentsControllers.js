@@ -167,7 +167,7 @@ export const webhook = async (req, res) => {
     if (!transaction) {
       return res.status(400).json({ error: 'Datos de transacción inválidos' })
     }
-
+    console.log(transaction.reference)
     const { data: pendingTx, error: txError } = await serviceRoleSupabase
       .from('payment_transactions')
       .select('*, pending_signups!inner(*)')
@@ -329,6 +329,17 @@ export const processCardPayment = async (req, res) => {
 
     const reference = wompiService.generateReference()
 
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .insert({
+        reference,
+        pending_signup_id: pendingSignup.id,
+        amount,
+        payment_method: 'card',
+        status: 'pending',
+        billing_frequency,
+      })
+
     const wompiBody = {
       amount_in_cents: amountInCents,
       currency: 'COP',
@@ -362,39 +373,25 @@ export const processCardPayment = async (req, res) => {
       }
     }
 
-    if (txStatus !== 'APPROVED') {
-      await serviceRoleSupabase
-        .from('payment_transactions')
-        .insert({
-          reference,
-          pending_signup_id: pendingSignup.id,
-          amount,
-          payment_method: 'card',
-          status: 'declined',
-          wompi_transaction_id: txId,
-          wompi_response: JSON.stringify(transaction),
-          billing_frequency,
-        })
+    const newStatus = txStatus === 'APPROVED' ? 'approved' : 'declined'
 
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .update({
+        status: newStatus,
+        wompi_transaction_id: txId,
+        wompi_response: JSON.stringify(transaction),
+        updated_at: new Date(),
+      })
+      .eq('reference', reference)
+
+    if (txStatus !== 'APPROVED') {
       const errorMsg = txStatus === 'PENDING'
         ? 'La transacción está pendiente. Vuelve a intentarlo más tarde.'
         : (transaction.status_message || 'La transacción fue rechazada')
 
       return res.status(400).json({ success: false, error: errorMsg })
     }
-
-    await serviceRoleSupabase
-      .from('payment_transactions')
-      .insert({
-        reference,
-        pending_signup_id: pendingSignup.id,
-        amount,
-        payment_method: 'card',
-        status: 'approved',
-        wompi_transaction_id: txId,
-        wompi_response: JSON.stringify(transaction),
-        billing_frequency,
-      })
 
     await activateUser(pendingSignup, txId)
 
@@ -423,7 +420,12 @@ const calculateAmount = (monthlyPrice, billingFrequency) => {
 }
 
 async function activateUser(pendingSignup, wompiTransactionId = null) {
-  if (pendingSignup.status === 'completed') return
+  const { data: existing } = await serviceRoleSupabase
+    .from('businesses')
+    .select('id')
+    .eq('email', pendingSignup.email)
+    .maybeSingle()
+  if (existing) return
 
   const { data: txData } = await serviceRoleSupabase
     .from('payment_transactions')
