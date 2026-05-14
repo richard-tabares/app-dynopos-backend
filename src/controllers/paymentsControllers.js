@@ -270,7 +270,6 @@ export const getAcceptanceTokens = async (req, res) => {
       .from('pending_signups')
       .select('*')
       .eq('id', id)
-      .eq('status', 'pending')
       .single()
 
     if (error || !pendingSignup) {
