@@ -189,24 +189,32 @@ export const webhook = async (req, res) => {
       })
       .eq('reference', transaction.reference)
 
-    if (transaction.status === 'APPROVED') {
-      if (pendingTx.pending_signups) {
-        if (pendingTx.payment_method !== 'card') {
-          await activateUser(pendingTx.pending_signups, transaction.id)
-        }
-      } else if (pendingTx.business_id) {
-        const { data: sub } = await serviceRoleSupabase
-          .from('subscriptions')
-          .select('*')
-          .eq('business_id', pendingTx.business_id)
-          .eq('status', 'active')
-          .single()
+    if (pendingTx.pending_signups) {
+      if (transaction.status === 'APPROVED' && pendingTx.payment_method !== 'card') {
+        await activateUser(pendingTx.pending_signups, transaction.id)
+      }
+    } else if (pendingTx.business_id) {
+      const { data: sub } = await serviceRoleSupabase
+        .from('subscriptions')
+        .select('*')
+        .eq('business_id', pendingTx.business_id)
+        .eq('status', 'active')
+        .single()
 
-        if (sub) {
+      if (sub) {
+        if (transaction.status === 'APPROVED') {
           const newEnd = addPeriod(sub.current_period_end, sub.billing_frequency)
           await serviceRoleSupabase
             .from('subscriptions')
-            .update({ current_period_end: newEnd, updated_at: new Date() })
+            .update({ current_period_end: newEnd, failed_attempts: 0, updated_at: new Date() })
+            .eq('id', sub.id)
+        } else if (transaction.status === 'DECLINED') {
+          const newAttempts = (sub.failed_attempts || 0) + 1
+          const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
+          if (newAttempts >= 5) updateData.status = 'expired'
+          await serviceRoleSupabase
+            .from('subscriptions')
+            .update(updateData)
             .eq('id', sub.id)
         }
       }

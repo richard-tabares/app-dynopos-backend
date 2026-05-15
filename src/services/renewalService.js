@@ -22,7 +22,7 @@ export const renewSubscription = async (subscription) => {
     .eq('user_id', subscription.business_id)
     .single()
 
-  if (!business) return
+  if (!business) return { status: 'skipped' }
 
   const { data: plan } = await serviceRoleSupabase
     .from('subscription_plans')
@@ -30,7 +30,7 @@ export const renewSubscription = async (subscription) => {
     .eq('id', subscription.plan_id)
     .single()
 
-  if (!plan) return
+  if (!plan) return { status: 'skipped' }
 
   const amount = calculateAmount(plan.monthly_price, subscription.billing_frequency)
   const amountInCents = Math.round(amount * 100)
@@ -68,14 +68,14 @@ export const renewSubscription = async (subscription) => {
       .eq('reference', reference)
       .single()
 
-    if (currentTx?.status !== 'pending') return
+    if (currentTx?.status !== 'pending') return { status: 'skipped' }
 
     if (transaction.status === 'APPROVED') {
       const newEnd = addPeriod(subscription.current_period_end, subscription.billing_frequency)
 
       await serviceRoleSupabase
         .from('subscriptions')
-        .update({ current_period_end: newEnd, updated_at: new Date() })
+        .update({ current_period_end: newEnd, failed_attempts: 0, updated_at: new Date() })
         .eq('id', subscription.id)
 
       await serviceRoleSupabase
@@ -87,7 +87,13 @@ export const renewSubscription = async (subscription) => {
           updated_at: new Date(),
         })
         .eq('reference', reference)
+
+      return { status: 'renewed' }
     } else if (transaction.status === 'DECLINED') {
+      const newAttempts = (subscription.failed_attempts || 0) + 1
+      const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
+      if (newAttempts >= 5) updateData.status = 'expired'
+
       await serviceRoleSupabase
         .from('payment_transactions')
         .update({ status: 'declined', wompi_transaction_id: transaction.id, updated_at: new Date() })
@@ -95,11 +101,26 @@ export const renewSubscription = async (subscription) => {
 
       await serviceRoleSupabase
         .from('subscriptions')
-        .update({ status: 'expired', updated_at: new Date() })
+        .update(updateData)
         .eq('id', subscription.id)
+
+      return { status: 'declined', failed_attempts: newAttempts }
     }
+
+    return { status: 'pending' }
   } catch (error) {
     console.error(`Renovación fallida para ${subscription.business_id}:`, error.message)
+
+    const newAttempts = (subscription.failed_attempts || 0) + 1
+    const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
+    if (newAttempts >= 5) updateData.status = 'expired'
+
+    await serviceRoleSupabase
+      .from('subscriptions')
+      .update(updateData)
+      .eq('id', subscription.id)
+
+    return { status: 'error', failed_attempts: newAttempts }
   }
 }
 
@@ -112,19 +133,19 @@ export const renewAllExpired = async () => {
     .eq('status', 'active')
     .lt('current_period_end', today)
 
-  if (!expiredSubs?.length) return { renewed: 0, expired: 0 }
+  if (!expiredSubs?.length) return { renewed: 0, attempts: 0 }
 
   let renewed = 0
-  let expired = 0
+  let attempts = 0
 
   for (const sub of expiredSubs) {
-    if (!sub.wompi_payment_source_id) {
-      continue
-    }
+    if (!sub.wompi_payment_source_id) continue
+    if ((sub.failed_attempts || 0) >= 5) continue
 
-    await renewSubscription(sub)
-    renewed++
+    const result = await renewSubscription(sub)
+    attempts++
+    if (result?.status === 'renewed') renewed++
   }
 
-  return { renewed }
+  return { renewed, attempts }
 }
