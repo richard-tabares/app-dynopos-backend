@@ -68,7 +68,9 @@ export const renewSubscription = async (subscription) => {
       .eq('reference', reference)
       .single()
 
-    if (currentTx?.status !== 'pending') return { status: 'skipped' }
+    // if (currentTx?.status !== 'pending') {
+    //   return { status: currentTx.status === 'approved' ? 'renewed' : 'declined' }
+    // }
 
     if (transaction.status === 'APPROVED') {
       const newEnd = addPeriod(subscription.current_period_end, subscription.billing_frequency)
@@ -133,9 +135,9 @@ export const renewAllExpired = async () => {
     .eq('status', 'active')
     .lt('current_period_end', today)
 
-  if (!expiredSubs?.length) return { renewed: 0, attempts: 0 }
+  if (!expiredSubs?.length) return { renewed: 'No', attempts: 0 }
 
-  let renewed = 0
+  let renewed = 'No'
   let attempts = 0
 
   for (const sub of expiredSubs) {
@@ -143,9 +145,10 @@ export const renewAllExpired = async () => {
     if ((sub.failed_attempts || 0) >= 5) continue
 
     const result = await renewSubscription(sub)
-    attempts++
-    if (result?.status === 'renewed') renewed++
+    attempts += result.failed_attempts || 0
+    
+    if (result?.status === 'renewed') renewed = 'Si'
   }
 
-  return { renewed, attempts }
+  return {  renewed, attempts }
 }
