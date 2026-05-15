@@ -1,5 +1,6 @@
 import { serviceRoleSupabase } from '../config/supabase.js'
 import * as wompiService from './wompiService.js'
+import { sendEmail, buildRenewalSuccessEmail, buildRenewalFailedEmail } from './emailService.js'
 
 const calculateAmount = (monthlyPrice, billingFrequency) => {
   if (billingFrequency === 'annual') return Math.round(monthlyPrice * 12 * 0.9)
@@ -18,7 +19,7 @@ const addPeriod = (date, frequency) => {
 export const renewSubscription = async (subscription) => {
   const { data: business } = await serviceRoleSupabase
     .from('businesses')
-    .select('email')
+    .select('business_name, email')
     .eq('user_id', subscription.business_id)
     .single()
 
@@ -90,6 +91,15 @@ export const renewSubscription = async (subscription) => {
         })
         .eq('reference', reference)
 
+      sendEmail(buildRenewalSuccessEmail({
+        businessName: business.business_name,
+        email: business.email,
+        amount,
+        billingFrequency: subscription.billing_frequency,
+        reference,
+        newPeriodEnd: newEnd,
+      }))
+
       return { status: 'renewed' }
     } else if (transaction.status === 'DECLINED') {
       const newAttempts = (subscription.failed_attempts || 0) + 1
@@ -106,6 +116,16 @@ export const renewSubscription = async (subscription) => {
         .update(updateData)
         .eq('id', subscription.id)
 
+      sendEmail(buildRenewalFailedEmail({
+        businessName: business.business_name,
+        email: business.email,
+        amount,
+        billingFrequency: subscription.billing_frequency,
+        reference,
+        failedAttempts: newAttempts,
+        periodEnd: subscription.current_period_end,
+      }))
+
       return { status: 'declined', failed_attempts: newAttempts }
     }
 
@@ -121,6 +141,16 @@ export const renewSubscription = async (subscription) => {
       .from('subscriptions')
       .update(updateData)
       .eq('id', subscription.id)
+
+    sendEmail(buildRenewalFailedEmail({
+      businessName: business.business_name,
+      email: business.email,
+      amount,
+      billingFrequency: subscription.billing_frequency,
+      reference,
+      failedAttempts: newAttempts,
+      periodEnd: subscription.current_period_end,
+    }))
 
     return { status: 'error', failed_attempts: newAttempts }
   }

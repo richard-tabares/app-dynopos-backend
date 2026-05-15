@@ -578,6 +578,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
 
   if (confirmLink) {
     const RESEND_API_KEY = process.env.RESEND_API_KEY
+    const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'dynopos@soporte.bykor.co' 
     if (RESEND_API_KEY) {
       fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -586,7 +587,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'DynoPOS <onboarding@resend.dev>',
+          from: `DynoPOS <${RESEND_FROM_EMAIL}>`,
           to: pendingSignup.email,
           subject: 'Confirma tu cuenta DynoPOS',
           html: `
