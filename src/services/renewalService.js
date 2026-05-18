@@ -73,6 +73,8 @@ export const renewSubscription = async (subscription) => {
     //   return { status: currentTx.status === 'approved' ? 'renewed' : 'declined' }
     // }
 
+    console.log(`[Renovación] Status Wompi recibido: ${transaction.status}`)
+
     if (transaction.status === 'APPROVED') {
       const newEnd = addPeriod(subscription.current_period_end, subscription.billing_frequency)
 
@@ -91,7 +93,8 @@ export const renewSubscription = async (subscription) => {
         })
         .eq('reference', reference)
 
-      sendEmail(buildRenewalSuccessEmail({
+      console.log(`[Renovación] Transacción aprobada para ${business.business_name}, enviando correo de éxito...`)
+      await sendEmail(buildRenewalSuccessEmail({
         businessName: business.business_name,
         email: business.email,
         amount,
@@ -116,7 +119,8 @@ export const renewSubscription = async (subscription) => {
         .update(updateData)
         .eq('id', subscription.id)
 
-      sendEmail(buildRenewalFailedEmail({
+      console.log(`[Renovación] Transacción declinada para ${business.business_name}, enviando correo de fallo...`)
+      await sendEmail(buildRenewalFailedEmail({
         businessName: business.business_name,
         email: business.email,
         amount,
@@ -142,7 +146,8 @@ export const renewSubscription = async (subscription) => {
       .update(updateData)
       .eq('id', subscription.id)
 
-    sendEmail(buildRenewalFailedEmail({
+    console.log(`[Renovación] Error en catch para ${business.business_name}, enviando correo de fallo...`)
+    await sendEmail(buildRenewalFailedEmail({
       businessName: business.business_name,
       email: business.email,
       amount,

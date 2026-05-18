@@ -1,6 +1,7 @@
 import { serviceRoleSupabase } from '../config/supabase.js'
 import * as wompiService from '../services/wompiService.js'
 import { encrypt, decrypt } from '../services/encryptionService.js'
+import { sendEmail, buildRenewalSuccessEmail, buildRenewalFailedEmail } from '../services/emailService.js'
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
@@ -202,12 +203,29 @@ export const webhook = async (req, res) => {
         .single()
 
       if (sub) {
+        const { data: business } = await serviceRoleSupabase
+          .from('businesses')
+          .select('business_name, email')
+          .eq('user_id', pendingTx.business_id)
+          .single()
+
         if (transaction.status === 'APPROVED') {
           const newEnd = addPeriod(sub.current_period_end, sub.billing_frequency)
           await serviceRoleSupabase
             .from('subscriptions')
             .update({ current_period_end: newEnd, failed_attempts: 0, updated_at: new Date() })
             .eq('id', sub.id)
+
+          if (business) {
+            await sendEmail(buildRenewalSuccessEmail({
+              businessName: business.business_name,
+              email: business.email,
+              amount: pendingTx.amount,
+              billingFrequency: sub.billing_frequency,
+              reference: transaction.reference,
+              newPeriodEnd: newEnd,
+            }))
+          }
         } else if (transaction.status === 'DECLINED') {
           const newAttempts = (sub.failed_attempts || 0) + 1
           const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
@@ -216,6 +234,18 @@ export const webhook = async (req, res) => {
             .from('subscriptions')
             .update(updateData)
             .eq('id', sub.id)
+
+          if (business) {
+            await sendEmail(buildRenewalFailedEmail({
+              businessName: business.business_name,
+              email: business.email,
+              amount: pendingTx.amount,
+              billingFrequency: sub.billing_frequency,
+              reference: transaction.reference,
+              failedAttempts: newAttempts,
+              periodEnd: sub.current_period_end,
+            }))
+          }
         }
       }
     }

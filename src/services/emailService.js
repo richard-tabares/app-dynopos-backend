@@ -1,16 +1,30 @@
 const RESEND_API_KEY = process.env.RESEND_API_KEY
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'dynopos@soporte.bykor.co'
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'bykorpos@soporte.bykor.co'
 
 export const sendEmail = async ({ from, to, subject, html }) => {
-    if (!RESEND_API_KEY) return
-    return fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ from, to, subject, html }),
-    }).catch((err) => console.error('Error sending email via Resend:', err))
+    if (!RESEND_API_KEY) {
+        console.error('[Email] RESEND_API_KEY no configurada')
+        return
+    }
+    try {
+        const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${RESEND_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ from, to, subject, html }),
+        })
+        if (!res.ok) {
+            const errBody = await res.text()
+            console.error(`[Email] Resend error ${res.status}:`, errBody)
+        } else {
+            console.log(`[Email] Correo enviado a ${to}:`, subject)
+        }
+        return res
+    } catch (err) {
+        console.error('[Email] Error enviando correo via Resend:', err)
+    }
 }
 
 export const buildRenewalSuccessEmail = ({
@@ -21,9 +35,9 @@ export const buildRenewalSuccessEmail = ({
     reference,
     newPeriodEnd,
 }) => ({
-    from: `DynoPOS <${FROM_EMAIL}>`,
+    from: `Bykor POS <${FROM_EMAIL}>`,
     to: email,
-    subject: 'Renovación exitosa - Plan Emprendedor DynoPOS',
+    subject: 'Renovación exitosa - Plan Emprendedor Bykor POS',
     html: `
     <h2>Tu suscripción ha sido renovada</h2>
     <p>Hola <strong>${businessName}</strong>,</p>
@@ -43,7 +57,7 @@ export const buildRenewalSuccessEmail = ({
         <td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Nuevo período hasta</td><td style="padding:8px;border:1px solid #ddd;">${new Date(newPeriodEnd).toLocaleDateString('es-CO')}</td>
       </tr>
     </table>
-    <br><p>Equipo DynoPOS</p>`,
+    <br><p>Equipo Bykor POS</p>`,
 })
 
 export const buildRenewalFailedEmail = ({
@@ -55,9 +69,9 @@ export const buildRenewalFailedEmail = ({
     failedAttempts,
     periodEnd,
 }) => ({
-    from: `DynoPOS <${FROM_EMAIL}>`,
+    from: `Bykor POS <${FROM_EMAIL}>`,
     to: email,
-    subject: 'Problema con la renovación de tu suscripción DynoPOS',
+    subject: 'Problema con la renovación de tu suscripción Bykor POS',
     html: `
     <h1>No pudimos renovar tu suscripción</h1>
     <p>Hola <strong>${businessName}</strong>,</p>
@@ -82,5 +96,5 @@ export const buildRenewalFailedEmail = ({
     <p style="color:#d32f2f;font-weight:bold;">⚠️ Tu plan vence el ${new Date(periodEnd).toLocaleDateString('es-CO')}. Después de 5 diás apartir de tu fecha de vencimiento, sino se efectua el pago tu cuenta será desactivada.</p>
     <h3>Recuerda actualizar tu método de pago.</h3>
     <p>Si necesitas actualizar tu método de pago, ingresa a tu panel de administración -> Configuración.</p>
-    <br><p>Equipo DynoPOS</p>`,
+    <br><p>Equipo Bykor POS</p>`,
 })
