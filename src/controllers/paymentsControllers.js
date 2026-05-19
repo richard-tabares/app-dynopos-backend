@@ -608,7 +608,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
 
   if (confirmLink) {
     const RESEND_API_KEY = process.env.RESEND_API_KEY
-    const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'dynopos@soporte.bykor.co' 
+    const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'bykorpos@soporte.bykor.co' 
     if (RESEND_API_KEY) {
       fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -617,11 +617,11 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: `DynoPOS <${RESEND_FROM_EMAIL}>`,
+          from: `Bykor POS <${RESEND_FROM_EMAIL}>`,
           to: pendingSignup.email,
-          subject: 'Confirma tu cuenta DynoPOS',
+          subject: 'Confirma tu cuenta Bykor POS',
           html: `
-            <h2>¡Bienvenido a DynoPOS!</h2>
+            <h2>¡Bienvenido a Bykor POS!</h2>
             <p>Tu pago fue exitoso y tu cuenta ha sido creada.</p>
             <p>Haz clic en el siguiente enlace para confirmar tu correo electrónico:</p>
             <p><a href="${confirmLink}" style="display:inline-block;padding:12px 24px;background:#0284c7;color:#fff;text-decoration:none;border-radius:6px;">Confirmar mi cuenta</a></p>
@@ -629,7 +629,7 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
             <p>${confirmLink}</p>
             <p>Tu correo: ${pendingSignup.email}</p>
             <br>
-            <p>Equipo DynoPOS</p>
+            <p>Equipo Bykor POS</p>
           `,
         }),
       }).catch(err => console.error('Error sending confirmation email via Resend:', err))
