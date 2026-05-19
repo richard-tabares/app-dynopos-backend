@@ -150,7 +150,7 @@ export const createSale = async (req, res) => {
 					payment_method,
 					status,
 					total_amount,
-					ticket_number: ticketData.get_next_ticket,
+					ticket_number: typeof ticketData === 'object' && ticketData !== null ? ticketData.get_next_ticket : ticketData,
 					created_at: localDate,
 				},
 			])
