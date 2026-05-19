@@ -282,6 +282,7 @@ export const getReports = async (req, res) => {
                 section: 'recent_sales',
                 data: (data || []).map(s => ({
                     id: s.id,
+                    ticketNumber: s.ticket_number,
                     total: s.total_amount,
                     date: s.created_at,
                     paymentMethod: s.payment_method,
@@ -442,7 +443,7 @@ export const getReports = async (req, res) => {
 
             const { data: returns, error: returnsError } = await client
                 .from('returns')
-                .select('*')
+                .select('*, salesTickets(ticket_number)')
                 .eq('business_id', businessId)
                 .eq('created_at', returnDate)
 

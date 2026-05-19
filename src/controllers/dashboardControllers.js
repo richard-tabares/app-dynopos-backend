@@ -131,6 +131,7 @@ export const getDashboardMetrics = async (req, res) => {
             lowStockItems: sortedLowStock,
             recentSales: recentSales.map(s => ({
                 id: s.id,
+                ticketNumber: s.ticket_number,
                 total: s.total_amount,
                 date: s.created_at,
                 paymentMethod: s.payment_method,
