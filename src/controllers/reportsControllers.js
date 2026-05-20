@@ -275,8 +275,37 @@ export const getReports = async (req, res) => {
             if (start) query = query.gte('created_at', start)
             if (end) query = query.lte('created_at', end)
 
-            const { data, error } = await query.order('created_at', { ascending: false }).limit(50)
+            const { data, error } = await query.order('ticket_number', { ascending: false }).limit(50)
             if (error) throw error
+
+            const saleIds = (data || []).map(s => s.id)
+            const returnedPerProduct = {}
+
+            if (saleIds.length > 0) {
+                const { data: returns } = await client
+                    .from('returns')
+                    .select('id, sale_id')
+                    .in('sale_id', saleIds)
+
+                if (returns && returns.length > 0) {
+                    const returnIds = returns.map(r => r.id)
+                    const saleOfReturn = {}
+                    returns.forEach(r => { saleOfReturn[r.id] = r.sale_id })
+
+                    const { data: returnedItems } = await client
+                        .from('returns_items')
+                        .select('return_id, product_id, quantity')
+                        .in('return_id', returnIds)
+
+                    if (returnedItems) {
+                        returnedItems.forEach(item => {
+                            const sid = saleOfReturn[item.return_id]
+                            if (!returnedPerProduct[sid]) returnedPerProduct[sid] = {}
+                            returnedPerProduct[sid][item.product_id] = (returnedPerProduct[sid][item.product_id] || 0) + item.quantity
+                        })
+                    }
+                }
+            }
 
             return res.json({
                 section: 'recent_sales',
@@ -287,7 +316,10 @@ export const getReports = async (req, res) => {
                     date: s.created_at,
                     paymentMethod: s.payment_method,
                     status: s.status,
-                    items: s.items,
+                    items: (s.items || []).map(item => ({
+                        ...item,
+                        already_returned: returnedPerProduct[s.id]?.[item.product_id] || 0
+                    })),
                     itemsCount: s.items_count
                 }))
             })

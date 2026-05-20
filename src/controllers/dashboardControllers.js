@@ -66,7 +66,20 @@ export const getDashboardMetrics = async (req, res) => {
         if (topError) throw topError
 
         const todaySaleIds = todaySalesData.map(s => s.id)
-        const todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
+        let todayRevenue = todaySalesData.reduce((acc, sale) => acc + sale.total_amount, 0)
+
+        if (todaySaleIds.length > 0) {
+            const { data: todayReturns, error: returnsError } = await client
+                .from('returns')
+                .select('total_amount')
+                .in('sale_id', todaySaleIds)
+                .eq('created_at', todayStr)
+
+            if (!returnsError && todayReturns) {
+                const returnedAmount = todayReturns.reduce((acc, r) => acc + Number(r.total_amount), 0)
+                todayRevenue -= returnedAmount
+            }
+        }
 
         let todayCost = 0
         if (todaySaleIds.length > 0) {

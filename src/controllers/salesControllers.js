@@ -11,7 +11,7 @@ export const getSales = async (req, res) => {
 			.from('vw_sales_history')
 			.select('*')
 			.eq('business_id', businessId)
-			.order('created_at', { ascending: false })
+			.order('ticket_number', { ascending: false })
 			.limit(10)
 
 		if (error) {
@@ -236,6 +236,79 @@ export const createSale = async (req, res) => {
 		})
 	} catch (error) {
 		res.status(500).json({ error: error.message })
+	}
+}
+
+export const updateSaleDate = async (req, res) => {
+	const client = getClient(req)
+	const { saleId } = req.params
+	const { date } = req.body
+
+	try {
+		if (!date) {
+			return res.status(400).json({ error: 'La fecha es requerida' })
+		}
+
+		const { data: sale, error: saleError } = await client
+			.from('salesTickets')
+			.select('id, business_id, ticket_number')
+			.eq('id', saleId)
+			.single()
+
+		if (saleError) {
+			return res.status(404).json({ error: 'Venta no encontrada' })
+		}
+
+		const { error: updateError } = await client
+			.from('salesTickets')
+			.update({ created_at: date })
+			.eq('id', saleId)
+
+		if (updateError) throw updateError
+
+		const { error: itemsError } = await client
+			.from('salesItems')
+			.update({ created_at: date })
+			.eq('sale_id', saleId)
+
+		if (itemsError) throw itemsError
+
+		const ticketNumber = sale.ticket_number
+		const { error: movementsError } = await client
+			.from('inventory_movements')
+			.update({ created_at: date })
+			.eq('business_id', sale.business_id)
+			.eq('type', 'sale')
+			.ilike('notes', `%#${ticketNumber}%`)
+
+		if (movementsError) {
+			console.error('Inventory movements update error:', movementsError)
+		}
+
+		const { data: updatedSale, error: fetchError } = await client
+			.from('vw_sales_history')
+			.select('*')
+			.eq('id', saleId)
+			.single()
+
+		if (fetchError) throw fetchError
+
+		res.json({
+			message: 'Fecha actualizada',
+			sale: {
+				id: updatedSale.id,
+				ticketNumber: updatedSale.ticket_number,
+				total: updatedSale.total_amount,
+				date: updatedSale.created_at,
+				paymentMethod: updatedSale.payment_method,
+				status: updatedSale.status,
+				items: updatedSale.items,
+				itemsCount: updatedSale.items_count
+			}
+		})
+	} catch (error) {
+		console.error('Error in updateSaleDate:', error)
+		res.status(500).json({ error: error.message || 'Error interno del servidor' })
 	}
 }
 
