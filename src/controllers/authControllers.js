@@ -31,12 +31,25 @@ export const login = async (req, res) => {
 
         if (businessError) throw new Error(businessError.message)
 
+        const { data: subscriptionData, error: subError } = await supabase
+            .from('subscriptions')
+            .select('status, plan_id, current_period_end')
+            .eq('business_id', data.user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        if (subError) {
+            console.error('Error fetching subscription:', subError.message)
+        }
+
         return res.json({
             status: 200,
             message: 'Login exitoso',
             data,
             profile: profileData,
             business: businessData,
+            subscription: subscriptionData || { status: null },
             access_token: data.session?.access_token,
         })
     } catch (error) {
