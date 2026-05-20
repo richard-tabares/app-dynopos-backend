@@ -188,6 +188,66 @@ export const updatePaymentSource = async (req, res) => {
     }
 }
 
+export const payNow = async (req, res) => {
+    const { businessId } = req.params
+    const client = getClient(req)
+    try {
+        const { data: subscription, error } = await client
+            .from('subscriptions')
+            .select(`
+                *,
+                plan:plan_id (
+                    id, name, description, monthly_price, features
+                )
+            `)
+            .eq('business_id', businessId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+
+        if (error) throw new Error(error.message)
+        if (!subscription) {
+            return res.status(404).json({ error: 'No se encontró una suscripción' })
+        }
+
+        const today = new Date().toISOString().split('T')[0]
+        const isExpired = subscription.current_period_end && subscription.current_period_end < today
+
+        if (!isExpired) {
+            return res.json({ status: 200, message: 'La suscripción ya está al día', renewed: true })
+        }
+
+        if (!subscription.wompi_payment_source_id) {
+            return res.status(400).json({ error: 'No hay un método de pago registrado. Actualiza tu método de pago primero.' })
+        }
+
+        const renewalResult = await renewSubscription(subscription)
+
+        if (renewalResult?.status === 'renewed') {
+            return res.json({
+                status: 200,
+                message: 'Suscripción renovada exitosamente',
+                renewed: true,
+                transaction: { status: 'approved' },
+            })
+        }
+
+        const txStatusMap = { declined: 'declined', pending: 'pending', error: 'error' }
+        const txStatus = txStatusMap[renewalResult?.status] || 'error'
+
+        res.json({
+            status: 200,
+            message: txStatus === 'pending'
+                ? 'El pago está pendiente de confirmación.'
+                : 'No se pudo renovar la suscripción.',
+            renewed: false,
+            transaction: { status: txStatus },
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
 export const reactivateSubscription = async (req, res) => {
     const client = getClient(req)
     const { businessId } = req.params
