@@ -63,19 +63,25 @@ export const renewSubscription = async (subscription) => {
       reference,
     })
 
-    const { data: currentTx } = await serviceRoleSupabase
-      .from('payment_transactions')
-      .select('status')
-      .eq('reference', reference)
-      .single()
+    let txStatus = transaction.status
+    let txId = transaction.id
 
-    // if (currentTx?.status !== 'pending') {
-    //   return { status: currentTx.status === 'approved' ? 'renewed' : 'declined' }
-    // }
+    console.log(`[Renovación] Status Wompi inicial: ${txStatus}`)
 
-    console.log(`[Renovación] Status Wompi recibido: ${transaction.status}`)
+    if (txStatus === 'PENDING') {
+      const MAX_RETRIES = 10
+      let retries = 0
+      while (txStatus === 'PENDING' && retries < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 3000))
+        const updated = await wompiService.getTransaction(txId)
+        txStatus = updated.status
+        txId = updated.id
+        retries++
+      }
+      console.log(`[Renovación] Status Wompi tras polling (${retries} intentos): ${txStatus}`)
+    }
 
-    if (transaction.status === 'APPROVED') {
+    if (txStatus === 'APPROVED') {
       const newEnd = addPeriod(subscription.current_period_end, subscription.billing_frequency)
 
       await serviceRoleSupabase
@@ -87,7 +93,7 @@ export const renewSubscription = async (subscription) => {
         .from('payment_transactions')
         .update({
           status: 'approved',
-          wompi_transaction_id: transaction.id,
+          wompi_transaction_id: txId,
           wompi_response: JSON.stringify(transaction),
           updated_at: new Date(),
         })
@@ -104,14 +110,16 @@ export const renewSubscription = async (subscription) => {
       }))
 
       return { status: 'renewed' }
-    } else if (transaction.status === 'DECLINED') {
+    }
+
+    if (txStatus === 'DECLINED') {
       const newAttempts = (subscription.failed_attempts || 0) + 1
       const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
       if (newAttempts >= 5) updateData.status = 'expired'
 
       await serviceRoleSupabase
         .from('payment_transactions')
-        .update({ status: 'declined', wompi_transaction_id: transaction.id, updated_at: new Date() })
+        .update({ status: 'declined', wompi_transaction_id: txId, updated_at: new Date() })
         .eq('reference', reference)
 
       await serviceRoleSupabase
@@ -133,9 +141,23 @@ export const renewSubscription = async (subscription) => {
       return { status: 'declined', failed_attempts: newAttempts }
     }
 
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .update({
+        wompi_transaction_id: txId,
+        wompi_response: JSON.stringify(transaction),
+        updated_at: new Date(),
+      })
+      .eq('reference', reference)
+
     return { status: 'pending' }
   } catch (error) {
     console.error(`Renovación fallida para ${subscription.business_id}:`, error.message)
+
+    await serviceRoleSupabase
+      .from('payment_transactions')
+      .update({ status: 'declined', wompi_response: JSON.stringify({ error: error.message }), updated_at: new Date() })
+      .eq('reference', reference)
 
     const newAttempts = (subscription.failed_attempts || 0) + 1
     const updateData = { failed_attempts: newAttempts, updated_at: new Date() }

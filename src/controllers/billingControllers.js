@@ -162,13 +162,26 @@ export const updatePaymentSource = async (req, res) => {
                 status: 200,
                 message: 'Método de pago actualizado y suscripción renovada exitosamente',
                 renewed: true,
+                transaction: {
+                    status: 'approved',
+                },
             })
         }
 
+        const txStatusMap = {
+            declined: 'declined',
+            pending: 'pending',
+            error: 'error',
+        }
+        const txStatus = txStatusMap[renewalResult?.status] || 'error'
+
         res.json({
             status: 200,
-            message: 'Método de pago actualizado. No se pudo renovar la suscripción automáticamente, pero el método de pago está listo para futuros intentos.',
+            message: txStatus === 'pending'
+                ? 'Método de pago actualizado. La renovación está pendiente de confirmación.'
+                : 'Método de pago actualizado. No se pudo renovar la suscripción automáticamente, pero el método de pago está listo para futuros intentos.',
             renewed: false,
+            transaction: { status: txStatus },
         })
     } catch (error) {
         res.status(500).json({ error: error.message })
