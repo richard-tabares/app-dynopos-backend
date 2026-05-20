@@ -213,7 +213,7 @@ export const webhook = async (req, res) => {
           const newEnd = addPeriod(sub.current_period_end, sub.billing_frequency)
           await serviceRoleSupabase
             .from('subscriptions')
-            .update({ current_period_end: newEnd, failed_attempts: 0, updated_at: new Date() })
+            .update({ current_period_end: newEnd, failed_attempts: 0, status: 'active', updated_at: new Date() })
             .eq('id', sub.id)
 
           if (business) {

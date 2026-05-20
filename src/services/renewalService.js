@@ -86,7 +86,7 @@ export const renewSubscription = async (subscription) => {
 
       await serviceRoleSupabase
         .from('subscriptions')
-        .update({ current_period_end: newEnd, failed_attempts: 0, updated_at: new Date() })
+        .update({ current_period_end: newEnd, failed_attempts: 0, status: 'active', updated_at: new Date() })
         .eq('id', subscription.id)
 
       await serviceRoleSupabase
