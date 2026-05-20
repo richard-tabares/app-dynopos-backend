@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js'
+import * as wompiService from '../services/wompiService.js'
 
 const getClient = (req) => req.supabase || supabase
 
@@ -49,6 +50,18 @@ export const getTransactions = async (req, res) => {
     }
 }
 
+export const getAcceptanceTokens = async (req, res) => {
+    try {
+        const tokens = await wompiService.getAcceptanceToken()
+        res.json({
+            acceptance_token: tokens.acceptance_token,
+            personal_data_auth: tokens.personal_data_auth,
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
 export const cancelRecurring = async (req, res) => {
     const client = getClient(req)
     const { businessId } = req.params
@@ -77,6 +90,40 @@ export const cancelRecurring = async (req, res) => {
         }
 
         res.json({ status: 200, message: 'Pagos recurrentes desactivados' })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
+export const updatePaymentSource = async (req, res) => {
+    const { businessId } = req.params
+    const { card_token, acceptance_token, customer_email } = req.body
+
+    if (!card_token || !acceptance_token || !customer_email) {
+        return res.status(400).json({ error: 'Faltan datos obligatorios' })
+    }
+
+    try {
+        const paymentSource = await wompiService.createPaymentSource({
+            type: 'CARD',
+            token: card_token,
+            customer_email,
+            acceptance_token,
+        })
+
+        const client = getClient(req)
+        const { data, error } = await client
+            .from('subscriptions')
+            .update({ wompi_payment_source_id: String(paymentSource.id), updated_at: new Date() })
+            .eq('business_id', businessId)
+            .select()
+
+        if (error) throw new Error(error.message)
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'No se encontró una suscripción para este negocio' })
+        }
+
+        res.json({ status: 200, message: 'Método de pago actualizado exitosamente' })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
