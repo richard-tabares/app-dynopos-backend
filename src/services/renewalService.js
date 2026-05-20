@@ -168,20 +168,23 @@ export const renewAllExpired = async () => {
     .from('subscriptions')
     .select('*')
     .eq('status', 'active')
+    .eq('auto_renew', true)
     .lt('current_period_end', today)
 
-  // if (!expiredSubs?.length) return { renewed: 0, attempts: 0 }
+  if (!expiredSubs?.length) return { renewed: 0, attempts: 0 }
 
-  // let renewed = 0
-  // let attempts = 0
+  let renewed = 0
+  let attempts = 0
 
   for (const sub of expiredSubs) {
     if (!sub.wompi_payment_source_id) continue
     if ((sub.failed_attempts || 0) >= 5) continue
 
     const result = await renewSubscription(sub)
-    //attempts += result.failed_attempts || 0
+    attempts += result.failed_attempts || 0
     
-    // if (result?.status === 'renewed') renewed++
+    if (result?.status === 'renewed') renewed++
   }
+
+  return { renewed, attempts }
 }
