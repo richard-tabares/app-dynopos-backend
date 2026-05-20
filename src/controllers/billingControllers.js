@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase.js'
 import * as wompiService from '../services/wompiService.js'
+import { renewSubscription } from '../services/renewalService.js'
 
 const getClient = (req) => req.supabase || supabase
 
@@ -123,7 +124,52 @@ export const updatePaymentSource = async (req, res) => {
             return res.status(404).json({ error: 'No se encontró una suscripción para este negocio' })
         }
 
-        res.json({ status: 200, message: 'Método de pago actualizado exitosamente' })
+        const today = new Date().toISOString().split('T')[0]
+        const isExpired = data[0].current_period_end && data[0].current_period_end < today
+
+        if (!isExpired) {
+            return res.json({ status: 200, message: 'Método de pago actualizado exitosamente' })
+        }
+
+        const { data: fullSub } = await client
+            .from('subscriptions')
+            .select(`
+                *,
+                plan:plan_id (
+                    id,
+                    name,
+                    description,
+                    monthly_price,
+                    features
+                )
+            `)
+            .eq('id', data[0].id)
+            .single()
+
+        if (!fullSub) {
+            return res.json({ status: 200, message: 'Método de pago actualizado exitosamente' })
+        }
+
+        const renewalResult = await renewSubscription(fullSub)
+
+        if (renewalResult?.status === 'renewed') {
+            await client
+                .from('subscriptions')
+                .update({ auto_renew: true, updated_at: new Date() })
+                .eq('id', data[0].id)
+
+            return res.json({
+                status: 200,
+                message: 'Método de pago actualizado y suscripción renovada exitosamente',
+                renewed: true,
+            })
+        }
+
+        res.json({
+            status: 200,
+            message: 'Método de pago actualizado. No se pudo renovar la suscripción automáticamente, pero el método de pago está listo para futuros intentos.',
+            renewed: false,
+        })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }

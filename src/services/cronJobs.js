@@ -2,8 +2,8 @@ import cron from 'node-cron'
 import { renewAllExpired } from './renewalService.js'
 
 export const startCronJobs = () => {
-  // cron.schedule('0 1 * * *', async () => {
-  cron.schedule('*/1 * * * *', async () => {
+  cron.schedule('0 1 * * *', async () => {
+  // cron.schedule('*/1 * * * *', async () => {
     console.log('[Cron] Iniciando renovación de suscripciones...')
     try {
       const result = await renewAllExpired()
