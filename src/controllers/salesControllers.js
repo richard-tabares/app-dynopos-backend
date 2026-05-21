@@ -71,7 +71,7 @@ export const getSales = async (req, res) => {
 
 export const createSale = async (req, res) => {
 	const client = getClient(req)
-	let { business_id, payment_method, status, salesItems } =
+	let { business_id, payment_method, status, salesItems, created_at: bodyCreatedAt } =
 		req.body
 
 	try {
@@ -130,7 +130,7 @@ export const createSale = async (req, res) => {
 
 		//crear venta con totales calculados
 		const now = new Date()
-		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+		const localDate = bodyCreatedAt || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 
 		// Obtener siguiente ticket_number (atómico por negocio)
 		const { data: ticketData, error: ticketError } = await client
