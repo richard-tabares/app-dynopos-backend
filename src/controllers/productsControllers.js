@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js'
+import { parseBarcode } from '../helpers/barcodeParser.js'
 
 const getClient = (req) => req.supabase || supabase
 
@@ -12,6 +13,7 @@ export const getProducts = async (req, res) => {
             created_at,
             name,
             sku,
+            barcode,
             price,
             unit_cost,
             is_active,
@@ -40,6 +42,7 @@ export const getProductById = async (req, res) => {
             created_at,
             name,
             sku,
+            barcode,
             price,
             unit_cost,
             is_active,
@@ -63,17 +66,20 @@ export const getProductById = async (req, res) => {
 export const createProduct = async (req, res) => {
     try {
         const client = getClient(req)
-        const { sku, business_id } = req.body
+        const { sku, business_id, barcode } = req.body
+        req.body.barcode = parseBarcode(barcode)
 
-        const { data: existing } = await client
-            .from('products')
-            .select('id')
-            .eq('sku', sku)
-            .eq('business_id', business_id)
-            .maybeSingle()
+        if (sku) {
+            const { data: existing } = await client
+                .from('products')
+                .select('id')
+                .eq('sku', sku)
+                .eq('business_id', business_id)
+                .maybeSingle()
 
-        if (existing) {
-            return res.status(409).json({ error: 'Ya existe un producto con este SKU' })
+            if (existing) {
+                return res.status(409).json({ error: 'Ya existe un producto con este SKU' })
+            }
         }
 
         const { data, error } = await client
@@ -85,6 +91,7 @@ export const createProduct = async (req, res) => {
                 created_at,
                 name,
                 sku,
+                barcode,
                 price,
                 unit_cost,
                 is_active,
@@ -110,7 +117,8 @@ export const updateProduct = async (req, res) => {
     try {
         const client = getClient(req)
         const { ProductId } = req.params
-        const { sku, business_id } = req.body
+        const { sku, business_id, barcode } = req.body
+        req.body.barcode = parseBarcode(barcode)
 
         if (sku && business_id) {
             const { data: existing } = await client
@@ -136,6 +144,7 @@ export const updateProduct = async (req, res) => {
                 created_at,
                 name,
                 sku,
+                barcode,
                 price,
                 unit_cost,
                 is_active,
