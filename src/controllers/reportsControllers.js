@@ -158,7 +158,7 @@ export const getReports = async (req, res) => {
 
             let query = client
                 .from('inventory_movements')
-                .select('*, products(name, sku)')
+                .select('*, products(name, sku, barcode)')
                 .eq('business_id', businessId)
 
             if (type) query = query.eq('type', type)
@@ -424,7 +424,7 @@ export const getReports = async (req, res) => {
                 .eq('business_id', businessId)
 
             if (productSearch) {
-                query = query.or(`product_name.ilike.%${productSearch}%,sku.eq.${productSearch}`)
+                query = query.or(`product_name.ilike.%${productSearch}%,sku.eq.${productSearch},barcode.ilike.%${productSearch}%`)
             }
 
             const { data, error } = await query.order('total_quantity_sold', { ascending: false }).limit(10)
