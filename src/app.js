@@ -13,6 +13,7 @@ import paymentsRoutes from './routes/paymentsRoutes.js'
 import cronRoutes from './routes/cronRoutes.js'
 import billingRoutes from './routes/billingRoutes.js'
 import supportRoutes from './routes/supportRoutes.js'
+import usersRoutes from './routes/usersRoutes.js'
 
 const app = express()
 
@@ -44,6 +45,7 @@ app.use('/api/payments', paymentsRoutes)
 app.use('/api/cron', cronRoutes)
 app.use('/api/billing', billingRoutes)
 app.use('/api/support', supportRoutes)
+app.use('/api/users', usersRoutes)
 
 // Global error handler
 app.use((err, req, res, next) => {

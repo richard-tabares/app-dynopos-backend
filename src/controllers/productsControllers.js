@@ -1,7 +1,7 @@
-import { supabase } from '../config/supabase.js'
+import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 import { parseBarcode } from '../helpers/barcodeParser.js'
 
-const getClient = (req) => req.supabase || supabase
+const getClient = (req) => req.user?.role === 'cajero' ? serviceRoleSupabase : (req.supabase || supabase)
 
 export const getProducts = async (req, res) => {
     const client = getClient(req)

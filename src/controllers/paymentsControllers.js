@@ -546,7 +546,8 @@ async function activateUser(pendingSignup, wompiTransactionId = null, paymentSou
   const userId = authData.user.id
 
   const { error: profileError } = await serviceRoleSupabase.from('profiles').insert({
-    user_id: userId,
+    id: userId,
+    business_id: userId,
     display_name: pendingSignup.owner_name,
     role: 'admin',
   })

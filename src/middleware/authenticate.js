@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { serviceRoleSupabase } from '../config/supabase.js'
 import dotenv from 'dotenv'
 
 dotenv.config()
@@ -33,7 +34,13 @@ export const authenticate = async (req, res, next) => {
             refresh_token: token,
         })
 
-        req.user = user
+        const { data: profile } = await supabaseClient
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle()
+
+        req.user = { ...user, role: profile?.role || 'cajero' }
         req.supabase = supabaseClient
         next()
     } catch (error) {

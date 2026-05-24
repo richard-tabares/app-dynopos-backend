@@ -19,22 +19,28 @@ export const login = async (req, res) => {
         const { data: profileData, error: profileError } = await supabase
             .from('profiles')
             .select('*')
-            .eq('user_id', data.user.id)
+            .eq('id', data.user.id)
             .single()
         if (profileError) throw new Error(profileError.message)
 
-        const { data: businessData, error: businessError } = await supabase
+        const businessId = profileData.role === 'cajero'
+            ? profileData.business_id
+            : data.user.id
+
+        const businessQuery = profileData.role === 'cajero' ? serviceRoleSupabase : supabase
+        const { data: businessData, error: businessError } = await businessQuery
             .from('businesses')
             .select('business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications, user_id')
-            .eq('user_id', data.user.id)
+            .eq('user_id', businessId)
             .single()
 
         if (businessError) throw new Error(businessError.message)
 
-        const { data: subscriptionData, error: subError } = await supabase
+        const subQuery = profileData.role === 'cajero' ? serviceRoleSupabase : supabase
+        const { data: subscriptionData, error: subError } = await subQuery
             .from('subscriptions')
             .select('status, plan_id, current_period_end')
-            .eq('business_id', data.user.id)
+            .eq('business_id', businessId)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle()
@@ -110,7 +116,8 @@ export const signup = async (req, res) => {
         }
 
         const { error: profileError } = await serviceRoleSupabase.from('profiles').insert({
-            user_id: data.user.id,
+            id: data.user.id,
+            business_id: data.user.id,
             display_name: '',
             role: 'admin',
         })
