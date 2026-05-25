@@ -1,6 +1,6 @@
-import { supabase } from '../config/supabase.js'
+import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 
-const getClient = (req) => req.supabase || supabase
+const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
 const addDateRange = (query, start, end) => {
     if (start) query = query.gte('sale_date', start)
