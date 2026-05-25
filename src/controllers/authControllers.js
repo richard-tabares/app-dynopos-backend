@@ -23,11 +23,11 @@ export const login = async (req, res) => {
             .single()
         if (profileError) throw new Error(profileError.message)
 
-        const businessId = profileData.role === 'cajero'
+        const businessId = profileData.role !== 'admin'
             ? profileData.business_id
             : data.user.id
 
-        const businessQuery = profileData.role === 'cajero' ? serviceRoleSupabase : supabase
+        const businessQuery = profileData.role !== 'admin' ? serviceRoleSupabase : supabase
         const { data: businessData, error: businessError } = await businessQuery
             .from('businesses')
             .select('business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications, user_id')
@@ -36,7 +36,7 @@ export const login = async (req, res) => {
 
         if (businessError) throw new Error(businessError.message)
 
-        const subQuery = profileData.role === 'cajero' ? serviceRoleSupabase : supabase
+        const subQuery = profileData.role !== 'admin' ? serviceRoleSupabase : supabase
         const { data: subscriptionData, error: subError } = await subQuery
             .from('subscriptions')
             .select('status, plan_id, current_period_end')

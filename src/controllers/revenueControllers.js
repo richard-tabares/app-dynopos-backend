@@ -1,6 +1,6 @@
 import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 
-const getClient = (req) => req.user?.role === 'cajero' ? serviceRoleSupabase : (req.supabase || supabase)
+const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
 export const getTodayRevenue = async (req, res) => {
     const { businessId } = req.params
