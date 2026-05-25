@@ -1,12 +1,18 @@
 -- ============================================
 -- VISTA: vw_sales_history
 -- Creada: 2026-04-28
+-- Actualizada: 2026-05-24 (agregado created_by, created_by_name)
 -- Descripción: Vista para el historial de ventas
 -- con items agregados y cálculo de itemsCount.
--- Reemplaza la query anidada en salesControllers.js
 -- ============================================
 -- Ejecutar en el SQL Editor de Supabase
 -- ============================================
+
+-- Agregar columna created_by si no existe
+ALTER TABLE salesTickets
+ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id);
+
+DROP VIEW IF EXISTS vw_sales_history;
 
 create or replace view vw_sales_history with (security_invoker = true) as
 select
@@ -16,6 +22,9 @@ select
     st.payment_method,
     st.status,
     st.business_id,
+    st.ticket_number,
+    st.created_by,
+    prof.display_name as created_by_name,
     jsonb_agg(
         jsonb_build_object(
             'id', si.id,
@@ -31,7 +40,8 @@ select
 from salesTickets st
 join salesItems si on si.sale_id = st.id
 left join products p on p.id = si.product_id
-group by st.id;
+left join profiles prof on prof.id = st.created_by
+group by st.id, prof.display_name;
 
 -- ============================================
 -- ÍNDICES RECOMENDADOS

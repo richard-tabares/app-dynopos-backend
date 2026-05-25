@@ -54,6 +54,7 @@ export const login = async (req, res) => {
             message: 'Login exitoso',
             data,
             profile: profileData,
+            permissions: profileData.permissions,
             business: businessData,
             subscription: subscriptionData || { status: null },
             access_token: data.session?.access_token,

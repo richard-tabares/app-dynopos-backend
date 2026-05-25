@@ -56,6 +56,7 @@ export const getSales = async (req, res) => {
 			date: s.created_at,
 			paymentMethod: s.payment_method,
 			status: s.status,
+			salesperson: s.created_by_name || null,
 			items: (s.items || []).map(item => ({
 				...item,
 				already_returned: returnedPerProduct[s.id]?.[item.product_id] || 0
@@ -152,6 +153,7 @@ export const createSale = async (req, res) => {
 					total_amount,
 					ticket_number: typeof ticketData === 'object' && ticketData !== null ? ticketData.get_next_ticket : ticketData,
 					created_at: localDate,
+					created_by: req.user.id,
 				},
 			])
 			.select()
@@ -302,6 +304,7 @@ export const updateSaleDate = async (req, res) => {
 				date: updatedSale.created_at,
 				paymentMethod: updatedSale.payment_method,
 				status: updatedSale.status,
+				salesperson: updatedSale.created_by_name || null,
 				items: updatedSale.items,
 				itemsCount: updatedSale.items_count
 			}

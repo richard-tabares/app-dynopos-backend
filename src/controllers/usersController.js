@@ -26,7 +26,7 @@ export const getUsers = async (req, res) => {
         const client = getClient(req)
         const { data, error } = await client
             .from('profiles')
-            .select('id, display_name, role, created_at')
+            .select('id, display_name, role, permissions, created_at')
             .eq('business_id', businessId)
             .neq('id', businessId)
             .order('created_at', { ascending: false })
@@ -54,12 +54,16 @@ export const getUsers = async (req, res) => {
 }
 
 export const createUser = async (req, res) => {
-    const { email, password, display_name, role } = req.body
+    const { email, password, display_name, role, permissions } = req.body
     const businessId = req.user.id
 
     try {
         if (!(await requireAdmin(req))) {
             return res.status(403).json({ error: 'No tienes permisos de administrador' })
+        }
+
+        if (role === 'admin') {
+            return res.status(403).json({ error: 'No puedes crear otro usuario administrador' })
         }
 
         const { data: authData, error: authError } = await serviceRoleSupabase.auth.admin.createUser({
@@ -79,6 +83,7 @@ export const createUser = async (req, res) => {
                 business_id: businessId,
                 display_name: display_name || '',
                 role: role || 'cajero',
+                permissions: permissions || null,
             })
 
         if (profileError) {
@@ -103,7 +108,7 @@ export const createUser = async (req, res) => {
 
 export const updateUser = async (req, res) => {
     const { userId } = req.params
-    const { display_name, role } = req.body
+    const { display_name, role, permissions } = req.body
     const businessId = req.user.id
 
     try {
@@ -113,6 +118,10 @@ export const updateUser = async (req, res) => {
 
         if (userId === businessId) {
             return res.status(403).json({ error: 'No puedes modificar tu propio usuario desde aquí' })
+        }
+
+        if (role === 'admin') {
+            return res.status(403).json({ error: 'No puedes asignar el rol administrador a otro usuario' })
         }
 
         const client = getClient(req)
@@ -130,6 +139,7 @@ export const updateUser = async (req, res) => {
         const updates = {}
         if (display_name !== undefined) updates.display_name = display_name
         if (role !== undefined) updates.role = role
+        if (permissions !== undefined) updates.permissions = permissions
 
         const { error } = await client
             .from('profiles')
