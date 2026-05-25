@@ -10,6 +10,7 @@ import dashboardRoutes from './routes/dashboardRoutes.js'
 import reportsRoutes from './routes/reportsRoutes.js'
 import revenueRoutes from './routes/revenueRoutes.js'
 import paymentsRoutes from './routes/paymentsRoutes.js'
+import plansRoutes from './routes/plansRoutes.js'
 import cronRoutes from './routes/cronRoutes.js'
 import billingRoutes from './routes/billingRoutes.js'
 import supportRoutes from './routes/supportRoutes.js'
@@ -41,6 +42,7 @@ app.use('/api/inventory', inventoryRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/reports', reportsRoutes)
 app.use('/api/revenue', revenueRoutes)
+app.use('/api/plans', plansRoutes)
 app.use('/api/payments', paymentsRoutes)
 app.use('/api/cron', cronRoutes)
 app.use('/api/billing', billingRoutes)
