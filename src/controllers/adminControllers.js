@@ -178,7 +178,7 @@ export const toggleClientStatus = async (req, res) => {
         if (findError) throw findError
         if (!sub) return res.status(404).json({ error: 'Suscripción no encontrada' })
 
-        const newStatus = is_active ? 'active' : 'cancelled'
+        const newStatus = is_active ? 'active' : 'expired'
 
         const { error } = await serviceRoleSupabase
             .from('subscriptions')
@@ -290,6 +290,22 @@ export const manualRenewal = async (req, res) => {
         if (error) throw error
 
         res.json({ status: 200, message: 'Suscripción renovada manualmente' })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
+export const updateClientInfo = async (req, res) => {
+    const { id } = req.params
+    const { business_name, owner_name, email, phone } = req.body
+    try {
+        const { data, error } = await serviceRoleSupabase
+            .from('businesses')
+            .update({ business_name, owner_name, email, phone })
+            .eq('user_id', id)
+            .select()
+        if (error) throw new Error(error)
+        res.json({ status: 200, message: 'Cliente actualizado', data })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }

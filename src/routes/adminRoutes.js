@@ -15,6 +15,7 @@ router.patch('/clients/:id/status', adminCtrl.toggleClientStatus)
 router.patch('/clients/:id/frequency', adminCtrl.changeBillingFrequency)
 router.patch('/clients/:id/extend', adminCtrl.extendSubscription)
 router.post('/clients/:id/renew', adminCtrl.manualRenewal)
+router.patch('/clients/:id/info', adminCtrl.updateClientInfo)
 
 router.get('/support/tickets', adminCtrl.getAdminTickets)
 router.patch('/support/tickets/:id/status', adminCtrl.updateTicketStatus)
