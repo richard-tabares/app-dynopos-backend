@@ -34,7 +34,7 @@ export const authenticate = async (req, res, next) => {
             refresh_token: token,
         })
 
-        const { data: profile } = await supabaseClient
+        const { data: profile } = await serviceRoleSupabase
             .from('profiles')
             .select('role')
             .eq('id', user.id)
