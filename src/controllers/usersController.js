@@ -23,8 +23,7 @@ export const getUsers = async (req, res) => {
             return res.status(403).json({ error: 'No tienes permisos de administrador' })
         }
 
-        const client = getClient(req)
-        const { data, error } = await client
+        const { data, error } = await serviceRoleSupabase
             .from('profiles')
             .select('id, display_name, role, permissions, created_at')
             .eq('business_id', businessId)

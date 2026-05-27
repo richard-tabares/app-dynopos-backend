@@ -22,4 +22,7 @@ router.patch('/support/tickets/:id/status', adminCtrl.updateTicketStatus)
 
 router.get('/payments', adminCtrl.getPayments)
 
+router.post('/clients/:id/clear-data', adminCtrl.clearClientData)
+router.delete('/clients/:id', adminCtrl.deleteClientAccount)
+
 export default router

@@ -397,3 +397,60 @@ export const getPayments = async (req, res) => {
         res.status(500).json({ error: error.message })
     }
 }
+
+export const clearClientData = async (req, res) => {
+    const { id } = req.params
+    try {
+        const { data: biz } = await serviceRoleSupabase
+            .from('businesses')
+            .select('user_id')
+            .eq('user_id', id)
+            .maybeSingle()
+        if (!biz) return res.status(404).json({ error: 'Cliente no encontrado' })
+
+        const { error: rpcError } = await serviceRoleSupabase.rpc('clear_business_data', {
+            p_business_id: id,
+        })
+        if (rpcError) throw rpcError
+
+        res.json({ status: 200, message: 'Datos del cliente limpiados exitosamente' })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
+
+export const deleteClientAccount = async (req, res) => {
+    const { id } = req.params
+    try {
+        const { data: biz } = await serviceRoleSupabase
+            .from('businesses')
+            .select('user_id, business_name')
+            .eq('user_id', id)
+            .maybeSingle()
+        if (!biz) return res.status(404).json({ error: 'Cliente no encontrado' })
+
+        const { data: userIds, error: rpcError } = await serviceRoleSupabase.rpc('delete_client_account', {
+            p_business_id: id,
+        })
+        if (rpcError) throw rpcError
+
+        const deleteResults = await Promise.allSettled(
+            (userIds || []).map((uid) =>
+                serviceRoleSupabase.auth.admin.deleteUser(uid),
+            ),
+        )
+
+        const failedDeletes = deleteResults
+            .filter((r) => r.status === 'rejected')
+            .map((r, i) => ({ uid: (userIds || [])[i], error: r.reason?.message }))
+
+        res.json({
+            status: 200,
+            message: 'Cuenta eliminada completamente',
+            deleted_users: userIds?.length || 0,
+            failed_deletes: failedDeletes.length > 0 ? failedDeletes : undefined,
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
