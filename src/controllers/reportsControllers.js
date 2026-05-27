@@ -129,6 +129,8 @@ export const getReports = async (req, res) => {
                     totalQuantity: p.totalQuantity,
                     totalRevenue: p.totalRevenue,
                     totalCost: p.totalCost,
+                    avgUnitPrice: p.totalQuantity > 0 ? Math.round(p.totalRevenue / p.totalQuantity) : 0,
+                    avgUnitCost: p.totalQuantity > 0 ? Math.round(p.totalCost / p.totalQuantity) : 0,
                     margin: p.totalRevenue > 0
                         ? Math.round(((p.totalRevenue - p.totalCost) / p.totalRevenue) * 100)
                         : 0
@@ -413,27 +415,6 @@ export const getReports = async (req, res) => {
                     avgTickets: avgTickets || [],
                     overallAvgTicket: Math.round(overallAvg)
                 }
-            })
-        }
-
-        if (section === 'product_performance') {
-            const { productSearch } = req.query
-            let query = client
-                .from('vw_product_performance')
-                .select('*')
-                .eq('business_id', businessId)
-
-            if (productSearch) {
-                query = query.or(`product_name.ilike.%${productSearch}%,sku.eq.${productSearch},barcode.ilike.%${productSearch}%`)
-            }
-
-            const { data, error } = await query.order('total_quantity_sold', { ascending: false }).limit(10)
-
-            if (error) throw error
-
-            return res.json({
-                section: 'product_performance',
-                data: data || []
             })
         }
 
