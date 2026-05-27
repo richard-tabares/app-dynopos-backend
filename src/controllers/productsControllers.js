@@ -242,30 +242,45 @@ export const bulkCreateProducts = async (req, res) => {
     }
 }
 
+const PRODUCT_SELECT = `
+    id,
+    business_id,
+    created_at,
+    name,
+    sku,
+    barcode,
+    price,
+    unit_cost,
+    is_active,
+    track_stock,
+    variation_type,
+    categories (
+        id,
+        name
+    ),
+    inventory (
+        stock,
+        min_stock
+    ),
+    product_variations (
+        id,
+        variation_name,
+        price,
+        unit_cost,
+        sku,
+        barcode,
+        stock,
+        is_active,
+        sort_order,
+        min_stock
+    )
+`
+
 export const getProducts = async (req, res) => {
     const client = getClient(req)
     const { data, error } = await client
         .from('products')
-        .select(
-            `id,
-            business_id,
-            created_at,
-            name,
-            sku,
-            barcode,
-            price,
-            unit_cost,
-            is_active,
-            track_stock,
-            categories (
-                id,
-                name
-            ),
-            inventory (
-                stock,
-                min_stock
-            )`
-        )
+        .select(PRODUCT_SELECT)
         .eq('business_id', req.params.businessId)
 
     if (error) return res.status(500).json(error)
@@ -275,26 +290,7 @@ export const getProductById = async (req, res) => {
     const client = getClient(req)
     const { data, error } = await client
         .from('products')
-        .select(
-            `id,
-            business_id,
-            created_at,
-            name,
-            sku,
-            barcode,
-            price,
-            unit_cost,
-            is_active,
-            track_stock,
-            categories (
-                id,
-                name
-            ),
-            inventory (
-                stock,
-                min_stock
-            )`
-        )
+        .select(PRODUCT_SELECT)
         .eq('id', req.params.ProductId)
         .single()
 
@@ -305,7 +301,7 @@ export const getProductById = async (req, res) => {
 export const createProduct = async (req, res) => {
     try {
         const client = getClient(req)
-        const { sku, business_id, barcode } = req.body
+        const { sku, business_id, barcode, variations, variation_type, ...productFields } = req.body
         req.body.barcode = parseBarcode(barcode)
 
         if (sku) {
@@ -321,32 +317,81 @@ export const createProduct = async (req, res) => {
             }
         }
 
+        const hasVariations = variations && variations.length > 0
+        const insertData = {
+            ...productFields,
+            sku,
+            barcode: req.body.barcode,
+            business_id,
+            variation_type: hasVariations ? (variation_type || null) : null,
+            price: hasVariations ? 0 : productFields.price,
+            unit_cost: hasVariations ? 0 : productFields.unit_cost,
+        }
+
         const { data, error } = await client
             .from('products')
-            .insert(req.body)
-            .select(
-                `id,
-                business_id,
-                created_at,
-                name,
-                sku,
-                barcode,
-                price,
-                unit_cost,
-                is_active,
-                track_stock,
-                categories (
-                    id,
-                    name
-                ),
-                inventory (
-                    stock,
-                    min_stock
-                )`
-            )
+            .insert(insertData)
+            .select(PRODUCT_SELECT)
 
         if (error) throw error
-        res.status(201).json({ status: 201, message: 'Producto Creado', data })
+
+        const product = Array.isArray(data) ? data[0] : data
+
+        if (hasVariations) {
+            const variationInserts = variations.map((v, i) => ({
+                product_id: product.id,
+                variation_name: v.variation_name,
+                price: v.price,
+                unit_cost: v.unit_cost || 0,
+                sku: v.sku || null,
+                barcode: parseBarcode(v.barcode || null),
+                stock: v.stock || 0,
+                min_stock: v.min_stock || 0,
+                sort_order: i,
+                is_active: v.is_active !== false,
+            }))
+
+            const { data: createdVariations, error: varError } = await client
+                .from('product_variations')
+                .insert(variationInserts)
+                .select()
+
+            if (varError) {
+                await client.from('products').delete().eq('id', product.id)
+                throw varError
+            }
+
+            product.product_variations = createdVariations || []
+
+            // If any variation has stock > 0, set track_stock = true and log movements
+            const hasStock = variations.some(v => Number(v.stock) > 0)
+            if (hasStock) {
+                const now = new Date()
+                const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+                await client.from('products').update({ track_stock: true }).eq('id', product.id)
+                product.track_stock = true
+
+                for (const v of createdVariations || []) {
+                    if (v.stock > 0) {
+                        await client.from('inventory_movements').insert({
+                            business_id,
+                            product_id: product.id,
+                            variation_id: v.id,
+                            type: 'entry',
+                            quantity: v.stock,
+                            unit_cost: v.unit_cost ?? 0,
+                            notes: 'Stock inicial de variación',
+                            created_at: localDate,
+                        })
+                    }
+                }
+            }
+            // Delete auto-created inventory row since variations track their own stock
+            await client.from('inventory').delete().eq('product_id', product.id)
+        }
+
+        res.status(201).json({ status: 201, message: 'Producto Creado', data: product })
     } catch (error) {
         console.error('Create product error:', error)
         res.status(500).json({ error: error.message })
@@ -356,7 +401,7 @@ export const updateProduct = async (req, res) => {
     try {
         const client = getClient(req)
         const { ProductId } = req.params
-        const { sku, business_id, barcode } = req.body
+        const { sku, business_id, barcode, variations, variation_type, ...productFields } = req.body
         req.body.barcode = parseBarcode(barcode)
 
         if (sku && business_id) {
@@ -373,33 +418,106 @@ export const updateProduct = async (req, res) => {
             }
         }
 
+        const hasVariations = variations && variations.length > 0
+        const updateData = {
+            ...productFields,
+            sku,
+            barcode: req.body.barcode,
+            variation_type: hasVariations ? (variation_type || null) : null,
+            price: hasVariations ? 0 : productFields.price,
+            unit_cost: hasVariations ? 0 : productFields.unit_cost,
+        }
+
         const { data, error } = await client
             .from('products')
-            .update(req.body)
+            .update(updateData)
             .eq('id', ProductId)
-            .select(
-                `id,
-                business_id,
-                created_at,
-                name,
-                sku,
-                barcode,
-                price,
-                unit_cost,
-                is_active,
-                track_stock,
-                categories (
-                    id,
-                    name
-                ),
-                inventory (
-                    stock,
-                    min_stock
-                )`
-            )
+            .select(PRODUCT_SELECT)
 
         if (error) throw error
-        res.json({ status: 200, message: 'Producto Actualizado', data: data[0] })
+
+        const product = data[0]
+
+        // Handle variations
+        if (variations !== undefined) {
+            // Delete removed variations
+            const keepIds = variations.filter(v => v.id).map(v => v.id)
+            if (keepIds.length > 0) {
+                await client
+                    .from('product_variations')
+                    .delete()
+                    .eq('product_id', ProductId)
+                    .not('id', 'in', `(${keepIds.map(id => `'${id}'`).join(',')})`)
+            } else {
+                await client
+                    .from('product_variations')
+                    .delete()
+                    .eq('product_id', ProductId)
+            }
+
+            // Upsert variations
+            const now = new Date()
+            const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+            for (let i = 0; i < variations.length; i++) {
+                const v = variations[i]
+                const varData = {
+                    product_id: ProductId,
+                    variation_name: v.variation_name,
+                    price: v.price,
+                    unit_cost: v.unit_cost || 0,
+                    sku: v.sku || null,
+                    barcode: parseBarcode(v.barcode || null),
+                    stock: v.stock || 0,
+                    min_stock: v.min_stock || 0,
+                    sort_order: i,
+                    is_active: v.is_active !== false,
+                }
+
+                if (v.id) {
+                    await client
+                        .from('product_variations')
+                        .update(varData)
+                        .eq('id', v.id)
+                } else {
+                    const { data: newVar, error: newVarError } = await client
+                        .from('product_variations')
+                        .insert(varData)
+                        .select()
+
+                    if (newVarError) throw newVarError
+
+                    if (newVar?.[0]?.stock > 0) {
+                        await client.from('inventory_movements').insert({
+                            business_id: product.business_id,
+                            product_id: ProductId,
+                            variation_id: newVar[0].id,
+                            type: 'entry',
+                            quantity: newVar[0].stock,
+                            unit_cost: newVar[0].unit_cost ?? 0,
+                            notes: 'Stock inicial de variación',
+                            created_at: localDate,
+                        })
+                    }
+                }
+            }
+
+            // If product has variations, delete auto-created inventory row
+            if (hasVariations) {
+                await client.from('inventory').delete().eq('product_id', ProductId)
+            }
+
+            // Re-fetch with variations
+            const { data: updatedProduct } = await client
+                .from('products')
+                .select(PRODUCT_SELECT)
+                .eq('id', ProductId)
+                .single()
+
+            return res.json({ status: 200, message: 'Producto Actualizado', data: updatedProduct })
+        }
+
+        res.json({ status: 200, message: 'Producto Actualizado', data: product })
     } catch (error) {
         console.error('Update product error:', error)
         res.status(500).json({ error: error.message })
@@ -449,6 +567,81 @@ export const deleteProduct = async (req, res) => {
         res.json({ status: 200, message: 'Producto Eliminado permanentemente', data: data[0] })
     } catch (error) {
         console.error('Delete error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+export const updateVariation = async (req, res) => {
+    const client = getClient(req)
+    const { variationId } = req.params
+    const { unit_cost, price, stock, min_stock, ...rest } = req.body
+
+    try {
+        const updateData = {
+            ...rest,
+            price: price !== undefined ? price : undefined,
+            unit_cost: unit_cost !== undefined ? unit_cost : undefined,
+            stock: stock !== undefined ? Number(stock) : undefined,
+            min_stock: min_stock !== undefined ? Number(min_stock) : undefined,
+        }
+
+        Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key])
+
+        const { data, error } = await client
+            .from('product_variations')
+            .update(updateData)
+            .eq('id', variationId)
+            .select()
+
+        if (error) throw error
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Variación no encontrada' })
+        }
+
+        res.json({ status: 200, message: 'Variación actualizada', data: data[0] })
+    } catch (error) {
+        console.error('Update variation error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
+export const deleteVariation = async (req, res) => {
+    const client = getClient(req)
+    const { variationId } = req.params
+
+    try {
+        const { data, error } = await client
+            .from('product_variations')
+            .delete()
+            .eq('id', variationId)
+            .select()
+
+        if (error) {
+            if (error.code === '23503') {
+                const { data: updatedData, error: updateError } = await client
+                    .from('product_variations')
+                    .update({ is_active: false })
+                    .eq('id', variationId)
+                    .select()
+
+                if (updateError) throw updateError
+                return res.json({ 
+                    status: 200, 
+                    message: 'Variación con movimientos de inventario: se ha marcado como inactiva', 
+                    data: updatedData[0],
+                    softDeleted: true 
+                })
+            }
+            throw error
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({ error: 'Variación no encontrada' })
+        }
+
+        res.json({ status: 200, message: 'Variación eliminada', data: data[0] })
+    } catch (error) {
+        console.error('Delete variation error:', error)
         res.status(500).json({ error: error.message })
     }
 }

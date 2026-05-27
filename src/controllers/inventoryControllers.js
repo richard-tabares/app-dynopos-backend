@@ -5,7 +5,7 @@ const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (r
 export const adjustInventory = async (req, res) => {
     const client = getClient(req)
     const { productId } = req.params
-    const { movement_type, quantity, unit_cost, min_stock, notes, business_id } = req.body
+    const { movement_type, quantity, unit_cost, min_stock, notes, business_id, variation_id } = req.body
 
     if (!movement_type || !['entry', 'exit'].includes(movement_type)) {
         return res.status(400).json({ error: 'Tipo de movimiento inválido. Use entry o exit' })
@@ -18,7 +18,7 @@ export const adjustInventory = async (req, res) => {
     try {
         const { data: product, error: productError } = await client
             .from('products')
-            .select(`id, name, business_id, unit_cost, inventory(stock, min_stock)`)
+            .select(`id, name, business_id, unit_cost, variation_type, inventory(stock, min_stock)`)
             .eq('id', productId)
             .single()
 
@@ -27,30 +27,73 @@ export const adjustInventory = async (req, res) => {
             throw new Error(productError.message || JSON.stringify(productError))
         }
 
-        const currentStock = product.inventory?.[0]?.stock || 0
-        const newStock = movement_type === 'entry'
-            ? currentStock + quantity
-            : currentStock - quantity
+        if (variation_id) {
+            const { data: variation, error: varFetchError } = await client
+                .from('product_variations')
+                .select('stock, min_stock')
+                .eq('id', variation_id)
+                .single()
 
-        if (newStock < 0) {
-            return res.status(400).json({
-                error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
-            })
-        }
+            if (varFetchError) {
+                throw new Error(varFetchError.message || JSON.stringify(varFetchError))
+            }
 
-        const updateFields = { stock: newStock }
-        if (min_stock !== undefined) {
-            updateFields.min_stock = min_stock
-        }
+            const currentStock = variation?.stock || 0
+            const newStock = movement_type === 'entry'
+                ? currentStock + quantity
+                : currentStock - quantity
 
-        const { error: updateError } = await client
-            .from('inventory')
-            .update(updateFields)
-            .eq('product_id', productId)
+            if (newStock < 0) {
+                return res.status(400).json({
+                    error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
+                })
+            }
 
-        if (updateError) {
-            console.error('Inventory update error:', updateError)
-            throw new Error(updateError.message || JSON.stringify(updateError))
+            const { error: updateVarError } = await client
+                .from('product_variations')
+                .update({ stock: newStock })
+                .eq('id', variation_id)
+
+            if (updateVarError) {
+                throw new Error(updateVarError.message || JSON.stringify(updateVarError))
+            }
+
+            if (min_stock !== undefined) {
+                const { error: minStockError } = await client
+                    .from('product_variations')
+                    .update({ min_stock })
+                    .eq('id', variation_id)
+
+                if (minStockError) {
+                    throw new Error(minStockError.message || JSON.stringify(minStockError))
+                }
+            }
+        } else {
+            const currentStock = product.inventory?.[0]?.stock || 0
+            const newStock = movement_type === 'entry'
+                ? currentStock + quantity
+                : currentStock - quantity
+
+            if (newStock < 0) {
+                return res.status(400).json({
+                    error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
+                })
+            }
+
+            const updateFields = { stock: newStock }
+            if (min_stock !== undefined) {
+                updateFields.min_stock = min_stock
+            }
+
+            const { error: updateError } = await client
+                .from('inventory')
+                .update(updateFields)
+                .eq('product_id', productId)
+
+            if (updateError) {
+                console.error('Inventory update error:', updateError)
+                throw new Error(updateError.message || JSON.stringify(updateError))
+            }
         }
 
         const now = new Date()
@@ -61,6 +104,7 @@ export const adjustInventory = async (req, res) => {
             .insert({
                 business_id: business_id || product.business_id,
                 product_id: productId,
+                variation_id: variation_id || null,
                 type: movement_type,
                 quantity,
                 unit_cost: unit_cost ?? product.unit_cost ?? 0,
@@ -73,15 +117,27 @@ export const adjustInventory = async (req, res) => {
             throw new Error(movementError.message || JSON.stringify(movementError))
         }
 
-        if (unit_cost !== undefined && unit_cost !== product.unit_cost) {
-            const { error: costError } = await client
-                .from('products')
-                .update({ unit_cost })
-                .eq('id', productId)
+        if (unit_cost !== undefined) {
+            if (variation_id) {
+                const { error: costError } = await client
+                    .from('product_variations')
+                    .update({ unit_cost })
+                    .eq('id', variation_id)
 
-            if (costError) {
-                console.error('Product cost update error:', costError)
-                throw new Error(costError.message || JSON.stringify(costError))
+                if (costError) {
+                    console.error('Variation cost update error:', costError)
+                    throw new Error(costError.message || JSON.stringify(costError))
+                }
+            } else if (unit_cost !== product.unit_cost) {
+                const { error: costError } = await client
+                    .from('products')
+                    .update({ unit_cost })
+                    .eq('id', productId)
+
+                if (costError) {
+                    console.error('Product cost update error:', costError)
+                    throw new Error(costError.message || JSON.stringify(costError))
+                }
             }
         }
 
@@ -94,12 +150,23 @@ export const adjustInventory = async (req, res) => {
                 price,
                 unit_cost,
                 is_active,
+                variation_type,
                 categories (
                     id,
                     name
                 ),
                 inventory (
                     stock,
+                    min_stock
+                ),
+                product_variations (
+                    id,
+                    variation_name,
+                    price,
+                    unit_cost,
+                    stock,
+                    is_active,
+                    sort_order,
                     min_stock
                 )`
             )

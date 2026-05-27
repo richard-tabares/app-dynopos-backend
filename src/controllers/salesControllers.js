@@ -88,7 +88,7 @@ export const createSale = async (req, res) => {
 		const productIds = salesItems.map((item) => item.product_id)
 		const { data: products, error: productsError } = await client
 			.from('products')
-			.select('id, name, price, unit_cost, track_stock, inventory(stock)')
+			.select('id, name, price, unit_cost, track_stock, variation_type, inventory(stock)')
 			.in('id', productIds)
 
 		if (productsError) {
@@ -96,6 +96,18 @@ export const createSale = async (req, res) => {
 			throw new Error(productsError.message || JSON.stringify(productsError))
 		}
 
+		// Collect variation IDs to fetch prices, stock, and costs
+		const variationIds = salesItems.filter(item => item.variation_id).map(item => item.variation_id)
+		let variations = []
+		if (variationIds.length > 0) {
+			const { data: varData, error: varError } = await client
+				.from('product_variations')
+				.select('id, variation_name, price, unit_cost, stock')
+				.in('id', variationIds)
+
+			if (varError) throw new Error(varError.message || JSON.stringify(varError))
+			variations = varData || []
+		}
 
 		for (const item of salesItems) {
 			const product = products.find((p) => p.id === item.product_id)
@@ -105,11 +117,26 @@ export const createSale = async (req, res) => {
 				})
 			}
 			if (product.track_stock === false) continue
-			const currentStock = product.inventory?.[0]?.stock || 0
-			if (item.quantity > currentStock) {
-				return res.status(400).json({
-					error: `El producto ${product.name} no tiene stock suficiente, stock actual es ${currentStock}`,
-				})
+
+			if (item.variation_id) {
+				const variation = variations.find(v => v.id === item.variation_id)
+				if (!variation) {
+					return res.status(400).json({
+						error: `Variación con ID ${item.variation_id} no encontrada`,
+					})
+				}
+				if (item.quantity > variation.stock) {
+					return res.status(400).json({
+						error: `La variación ${product.name} - ${variation.variation_name} no tiene stock suficiente, stock actual es ${variation.stock}`,
+					})
+				}
+			} else {
+				const currentStock = product.inventory?.[0]?.stock || 0
+				if (item.quantity > currentStock) {
+					return res.status(400).json({
+						error: `El producto ${product.name} no tiene stock suficiente, stock actual es ${currentStock}`,
+					})
+				}
 			}
 		}
 
@@ -117,15 +144,31 @@ export const createSale = async (req, res) => {
 		let total_amount = 0
 		const itemsWithPrices = salesItems.map((item) => {
 			const product = products.find((p) => p.id === item.product_id)
-			const subtotal = product.price * item.quantity
+
+			let unitPrice
+			let unitCost
+			let variationName = null
+
+			if (item.variation_id) {
+				const variation = variations.find(v => v.id === item.variation_id)
+				unitPrice = variation ? variation.price : product.price
+				unitCost = variation ? (variation.unit_cost ?? 0) : (product.unit_cost ?? 0)
+				variationName = variation ? variation.variation_name : null
+			} else {
+				unitPrice = product.price
+				unitCost = product.unit_cost ?? 0
+			}
+
+			const subtotal = unitPrice * item.quantity
 			total_amount += subtotal
 
 			return {
 				...item,
-				unit_price: product.price,
-				unit_cost: product.unit_cost ?? 0,
+				unit_price: unitPrice,
+				unit_cost: unitCost,
 				subtotal,
 				track_stock: product.track_stock ?? true,
+				variation_name: variationName,
 			}
 		})
 
@@ -185,24 +228,39 @@ export const createSale = async (req, res) => {
 		for (const item of itemsWithPrices) {
 			const product = products.find((p) => p.id === item.product_id)
 			if (product.track_stock === false) continue
-			//Calcular nuevo stock
-			const currentStock = product.inventory?.[0]?.stock || 0
-			const newStock = currentStock - item.quantity
 
-			//Actualizar stock en tabla inventory
-			const { error: updateStockError } = await client
-				.from('inventory')
-				.update({ stock: newStock })
-				.eq('product_id', item.product_id)
+			if (item.variation_id) {
+				const variation = variations.find(v => v.id === item.variation_id)
+				const newStock = (variation?.stock || 0) - item.quantity
 
-			if (updateStockError) {
-				console.error('Stock update error:', updateStockError)
-				throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+				const { error: updateVarError } = await client
+					.from('product_variations')
+					.update({ stock: newStock })
+					.eq('id', item.variation_id)
+
+				if (updateVarError) {
+					console.error('Variation stock update error:', updateVarError)
+					throw new Error(updateVarError.message || JSON.stringify(updateVarError))
+				}
+			} else {
+				const currentStock = product.inventory?.[0]?.stock || 0
+				const newStock = currentStock - item.quantity
+
+				const { error: updateStockError } = await client
+					.from('inventory')
+					.update({ stock: newStock })
+					.eq('product_id', item.product_id)
+
+				if (updateStockError) {
+					console.error('Stock update error:', updateStockError)
+					throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+				}
 			}
 
 			movements.push({
 				business_id,
 				product_id: item.product_id,
+				variation_id: item.variation_id || null,
 				type: 'sale',
 				quantity: item.quantity,
 				unit_cost: item.unit_cost,
@@ -401,23 +459,43 @@ export const returnSale = async (req, res) => {
 				continue
 			}
 
-			const { data: product } = await client
-				.from('products')
-				.select('id, inventory(stock)')
-				.eq('id', returnItem.product_id)
-				.single()
+			if (returnItem.variation_id) {
+				const { data: variation } = await client
+					.from('product_variations')
+					.select('stock')
+					.eq('id', returnItem.variation_id)
+					.single()
 
-			const currentStock = product?.inventory?.[0]?.stock || 0
-			const newStock = currentStock + returnItem.quantity
+				const newStock = (variation?.stock || 0) + returnItem.quantity
 
-			const { error: updateStockError } = await client
-				.from('inventory')
-				.update({ stock: newStock })
-				.eq('product_id', returnItem.product_id)
+				const { error: updateVarError } = await client
+					.from('product_variations')
+					.update({ stock: newStock })
+					.eq('id', returnItem.variation_id)
 
-			if (updateStockError) {
-				console.error('Stock update error during return:', updateStockError)
-				throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+				if (updateVarError) {
+					console.error('Variation stock update error during return:', updateVarError)
+					throw new Error(updateVarError.message || JSON.stringify(updateVarError))
+				}
+			} else {
+				const { data: product } = await client
+					.from('products')
+					.select('id, inventory(stock)')
+					.eq('id', returnItem.product_id)
+					.single()
+
+				const currentStock = product?.inventory?.[0]?.stock || 0
+				const newStock = currentStock + returnItem.quantity
+
+				const { error: updateStockError } = await client
+					.from('inventory')
+					.update({ stock: newStock })
+					.eq('product_id', returnItem.product_id)
+
+				if (updateStockError) {
+					console.error('Stock update error during return:', updateStockError)
+					throw new Error(updateStockError.message || JSON.stringify(updateStockError))
+				}
 			}
 
 			totalReturnAmount += returnItem.subtotal
@@ -425,6 +503,7 @@ export const returnSale = async (req, res) => {
 			movements.push({
 				business_id: business_id || sale.business_id,
 				product_id: returnItem.product_id,
+				variation_id: returnItem.variation_id || null,
 				type: 'return',
 				quantity: returnItem.quantity,
 				unit_cost: returnItem.unit_cost ?? 0,
@@ -464,6 +543,8 @@ export const returnSale = async (req, res) => {
 		const returnItems = items.map(item => ({
 			return_id: returnRecord.id,
 			product_id: item.product_id,
+			variation_id: item.variation_id || null,
+			variation_name: item.variation_name || null,
 			quantity: item.quantity,
 			unit_price: item.unit_price,
 			subtotal: item.subtotal,
