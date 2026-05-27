@@ -1,11 +1,12 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { authenticate } from "../middleware/authenticate.js"
-import { getProducts, createProduct, updateProduct, deleteProduct, getProductById, bulkCreateProducts } from '../controllers/productsControllers.js'
+import { getProducts, createProduct, updateProduct, deleteProduct, getProductById, bulkCreateProducts, generateTemplate } from '../controllers/productsControllers.js'
 
 const upload = multer({ storage: multer.memoryStorage() })
 const router = Router()
 
+router.get('/template', generateTemplate)
 router.get('/:businessId', authenticate, getProducts)
 router.get('/product/:ProductId', authenticate, getProductById)
 router.post('/createProduct', authenticate, createProduct)

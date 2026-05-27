@@ -4,6 +4,30 @@ import { parseBarcode } from '../helpers/barcodeParser.js'
 
 const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
+const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Costo Unitario', 'Precio', 'Categoria', 'Stock Minimo', 'Stock Inicial']
+
+export const generateTemplate = async (req, res) => {
+    try {
+        const sampleData = [
+            ['7701234567890', 'CAF-001', 'Café Premium 500g', 18000, 28500, 'Café', 10, 50],
+        ]
+
+        const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleData])
+        ws['!cols'] = TEMPLATE_HEADERS.map(() => ({ wch: 22 }))
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Productos')
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        res.setHeader('Content-Disposition', 'attachment; filename="plantilla-carga-masiva.xlsx"')
+        res.send(buffer)
+    } catch (error) {
+        console.error('Template generation error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 const COLUMN_MAP = {
     'nombre': 'name',
     'sku': 'sku',
