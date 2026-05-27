@@ -130,8 +130,7 @@ export const createSale = async (req, res) => {
 		})
 
 		//crear venta con totales calculados
-		const now = new Date()
-		const localDate = bodyCreatedAt || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+		const localDate = bodyCreatedAt || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())
 
 		// Obtener siguiente ticket_number (atómico por negocio)
 		const { data: ticketData, error: ticketError } = await client
@@ -320,8 +319,7 @@ export const returnSale = async (req, res) => {
 	const { id } = req.params
 	const { reason, business_id, items } = req.body
 
-	const now = new Date()
-	const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+	const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())
 
 	try {
 		if (!items || items.length === 0) {

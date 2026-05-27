@@ -4,8 +4,7 @@ const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (r
 
 export const getTodayRevenue = async (req, res) => {
     const { businessId } = req.params
-    const now = new Date()
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())
 
     try {
         const client = getClient(req)
