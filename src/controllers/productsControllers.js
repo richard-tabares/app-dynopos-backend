@@ -4,12 +4,15 @@ import { parseBarcode } from '../helpers/barcodeParser.js'
 
 const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
-const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Costo Unitario', 'Precio', 'Categoria', 'Stock Minimo', 'Stock Inicial']
+const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Tipo Variacion', 'Nombre Variacion', 'Costo Unitario', 'Precio', 'Categoria', 'Stock Inicial', 'Stock Minimo']
 
 export const generateTemplate = async (req, res) => {
     try {
         const sampleData = [
-            ['7701234567890', 'CAF-001', 'Café Premium 500g', 18000, 28500, 'Café', 10, 50],
+            ['7701234567890', 'CAF-001', 'Café Premium 500g', '', '', 18000, 28500, 'Café', 50, 10],
+            ['', 'CAM-S', 'Camiseta Deportiva', 'Talla', 'S', 15000, 25000, 'Ropa', 50, 10],
+            ['', 'CAM-M', 'Camiseta Deportiva', 'Talla', 'M', 16000, 27000, 'Ropa', 40, 10],
+            ['', 'CAM-L', 'Camiseta Deportiva', 'Talla', 'L', 17000, 29000, 'Ropa', 30, 5],
         ]
 
         const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleData])
@@ -28,6 +31,11 @@ export const generateTemplate = async (req, res) => {
     }
 }
 
+const getLocalDate = () => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 const COLUMN_MAP = {
     'nombre': 'name',
     'sku': 'sku',
@@ -37,6 +45,8 @@ const COLUMN_MAP = {
     'categoria': 'category',
     'stock inicial': 'stock',
     'stock minimo': 'min_stock',
+    'tipo variacion': 'variation_type',
+    'nombre variacion': 'variation_name',
 }
 
 const normalizeRow = (row) => {
@@ -46,6 +56,263 @@ const normalizeRow = (row) => {
         if (mapped) normalized[mapped] = value
     }
     return normalized
+}
+
+const createSimpleProduct = async (client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum) => {
+    const name = String(row.name || '').trim()
+    const price = Number(row.price)
+
+    if (!name) {
+        results.errors.push({ row: rowNum, error: 'El nombre es obligatorio' })
+        return
+    }
+    if (!price || price <= 0) {
+        results.errors.push({ row: rowNum, error: 'El precio debe ser mayor a 0' })
+        return
+    }
+
+    const sku = row.sku ? String(row.sku).trim() : ''
+    const barcode = row.barcode ? String(row.barcode).trim() : ''
+    const unitCost = row.unit_cost ? Number(row.unit_cost) : null
+    const stock = row.stock ? Number(row.stock) : 0
+    const minStock = row.min_stock ? Number(row.min_stock) : 0
+    const categoryName = row.category ? String(row.category).trim() : ''
+
+    if (sku) {
+        const skuLower = sku.toLowerCase()
+        if (seenSkus.has(skuLower)) {
+            results.errors.push({ row: rowNum, error: `SKU duplicado en el mismo archivo: "${sku}"` })
+            return
+        }
+        seenSkus.add(skuLower)
+
+        const { data: existing } = await client
+            .from('products')
+            .select('id')
+            .eq('sku', sku)
+            .eq('business_id', businessId)
+            .maybeSingle()
+
+        if (existing) {
+            results.errors.push({ row: rowNum, error: `Ya existe un producto con el SKU "${sku}"` })
+            return
+        }
+    }
+
+    if (barcode) {
+        const barcodeLower = barcode.toLowerCase()
+        if (seenBarcodes.has(barcodeLower)) {
+            results.errors.push({ row: rowNum, error: `Código de barras duplicado en el mismo archivo: "${barcode}"` })
+            return
+        }
+        seenBarcodes.add(barcodeLower)
+
+        const { data: existing } = await client
+            .from('products')
+            .select('id')
+            .eq('barcode', barcode)
+            .eq('business_id', businessId)
+            .maybeSingle()
+
+        if (existing) {
+            results.errors.push({ row: rowNum, error: `Ya existe un producto con el código de barras "${barcode}"` })
+            return
+        }
+    }
+
+    let categoryId = null
+    if (categoryName) {
+        const lowerName = categoryName.toLowerCase()
+        if (categoryMap[lowerName]) {
+            categoryId = categoryMap[lowerName]
+        } else {
+            const { data: newCat, error: catError } = await client
+                .from('categories')
+                .insert({ business_id: businessId, name: categoryName })
+                .select('id, name')
+                .single()
+
+            if (catError) {
+                results.errors.push({ row: rowNum, error: `Error al crear categoría "${categoryName}"` })
+                return
+            }
+            categoryId = newCat.id
+            categoryMap[lowerName] = newCat.id
+        }
+    }
+
+    const productData = {
+        business_id: businessId,
+        name,
+        price,
+        sku: sku || null,
+        barcode: parseBarcode(barcode || null),
+        unit_cost: unitCost,
+        category_id: categoryId,
+        track_stock: stock > 0,
+    }
+
+    const { data: product, error: productError } = await client
+        .from('products')
+        .insert(productData)
+        .select('id, name, track_stock')
+        .single()
+
+    if (productError) {
+        results.errors.push({ row: rowNum, error: `Error al crear producto: ${productError.message}` })
+        return
+    }
+
+    if (stock > 0) {
+        const localDate = getLocalDate()
+
+        const { error: movError } = await client
+            .from('inventory_movements')
+            .insert({
+                business_id: businessId,
+                product_id: product.id,
+                type: 'entry',
+                quantity: stock,
+                unit_cost: unitCost ?? 0,
+                notes: 'Carga masiva inicial',
+                created_at: localDate,
+            })
+
+        if (movError) {
+            results.errors.push({ row: rowNum, error: `Producto creado pero error en inventario: ${movError.message}` })
+        } else {
+            const { error: stockUpdateError } = await client
+                .from('inventory')
+                .update({ stock })
+                .eq('product_id', product.id)
+
+            if (stockUpdateError) {
+                results.errors.push({ row: rowNum, error: `Producto creado pero error al actualizar stock: ${stockUpdateError.message}` })
+            }
+        }
+    }
+
+    if (minStock > 0) {
+        const { error: minStockError } = await client
+            .from('inventory')
+            .update({ min_stock: minStock })
+            .eq('product_id', product.id)
+
+        if (minStockError) {
+            results.errors.push({ row: rowNum, error: `Producto creado pero error al actualizar stock mínimo: ${minStockError.message}` })
+        }
+    }
+
+    results.created++
+}
+
+const createVariationProduct = async (client, businessId, group, results, categoryMap) => {
+    const { name: productName, variationType, variations } = group
+
+    const { data: existing } = await client
+        .from('products')
+        .select('id')
+        .eq('name', productName)
+        .eq('business_id', businessId)
+        .maybeSingle()
+
+    if (existing) {
+        results.errors.push({ error: `Ya existe un producto llamado "${productName}"` })
+        return
+    }
+
+    let categoryId = null
+    const firstVar = variations[0]
+    const categoryName = String(firstVar.category || '').trim()
+    if (categoryName) {
+        const lowerName = categoryName.toLowerCase()
+        if (categoryMap[lowerName]) {
+            categoryId = categoryMap[lowerName]
+        } else {
+            const { data: newCat, error: catError } = await client
+                .from('categories')
+                .insert({ business_id: businessId, name: categoryName })
+                .select('id, name')
+                .single()
+
+            if (!catError) {
+                categoryId = newCat.id
+                categoryMap[lowerName] = newCat.id
+            }
+        }
+    }
+
+    const { data: product, error: productError } = await client
+        .from('products')
+        .insert({
+            business_id: businessId,
+            name: productName,
+            price: 0,
+            unit_cost: 0,
+            category_id: categoryId,
+            track_stock: true,
+            variation_type: variationType,
+        })
+        .select('id, name')
+        .single()
+
+    if (productError) {
+        results.errors.push({ error: `Error al crear producto "${productName}": ${productError.message}` })
+        return
+    }
+
+    const variationInserts = variations.map((v, i) => ({
+        product_id: product.id,
+        variation_name: String(v.variation_name || '').trim(),
+        price: Number(v.price) || 0,
+        unit_cost: Number(v.unit_cost) || 0,
+        sku: v.sku ? String(v.sku).trim() : null,
+        barcode: parseBarcode(v.barcode ? String(v.barcode).trim() : null),
+        stock: Number(v.stock) || 0,
+        min_stock: Number(v.min_stock) || 0,
+        sort_order: i,
+        is_active: true,
+    }))
+
+    const { data: createdVariations, error: varError } = await client
+        .from('product_variations')
+        .insert(variationInserts)
+        .select()
+
+    if (varError) {
+        results.errors.push({ error: `Error al crear variaciones para "${productName}": ${varError.message}` })
+        return
+    }
+
+    await client.from('inventory').delete().eq('product_id', product.id)
+
+    if (createdVariations) {
+        const localDate = getLocalDate()
+        const movInserts = createdVariations
+            .filter(v => v.stock > 0)
+            .map(v => ({
+                business_id: businessId,
+                product_id: product.id,
+                variation_id: v.id,
+                type: 'entry',
+                quantity: v.stock,
+                unit_cost: v.unit_cost || 0,
+                notes: 'Carga masiva inicial',
+                created_at: localDate,
+            }))
+
+        if (movInserts.length > 0) {
+            const { error: movError } = await client
+                .from('inventory_movements')
+                .insert(movInserts)
+
+            if (movError) {
+                results.errors.push({ error: `Producto "${productName}" creado pero error en movimientos de inventario: ${movError.message}` })
+            }
+        }
+    }
+
+    results.created++
 }
 
 export const bulkCreateProducts = async (req, res) => {
@@ -78,161 +345,38 @@ export const bulkCreateProducts = async (req, res) => {
         const seenSkus = new Set()
         const seenBarcodes = new Set()
         const results = { created: 0, errors: [], total: rows.length }
+        const variationGroups = {}
 
         for (let i = 0; i < rows.length; i++) {
             const row = normalizeRow(rows[i])
             const rowNum = i + 2
 
-            try {
+            const variationType = row.variation_type ? String(row.variation_type).trim() : ''
+            const variationName = row.variation_name ? String(row.variation_name).trim() : ''
+
+            if (variationType && variationName) {
                 const name = String(row.name || '').trim()
-                const price = Number(row.price)
-
                 if (!name) {
-                    results.errors.push({ row: rowNum, error: 'El nombre es obligatorio' })
+                    results.errors.push({ row: rowNum, error: 'El nombre del producto es obligatorio para variaciones' })
                     continue
                 }
-                if (!price || price <= 0) {
-                    results.errors.push({ row: rowNum, error: 'El precio debe ser mayor a 0' })
-                    continue
-                }
-
-                const sku = row.sku ? String(row.sku).trim() : ''
-                const barcode = row.barcode ? String(row.barcode).trim() : ''
-                const unitCost = row.unit_cost ? Number(row.unit_cost) : null
-                const stock = row.stock ? Number(row.stock) : 0
-                const minStock = row.min_stock ? Number(row.min_stock) : 0
-                const categoryName = row.category ? String(row.category).trim() : ''
-
-                if (sku) {
-                    const skuLower = sku.toLowerCase()
-                    if (seenSkus.has(skuLower)) {
-                        results.errors.push({ row: rowNum, error: `SKU duplicado en el mismo archivo: "${sku}"` })
-                        continue
-                    }
-                    seenSkus.add(skuLower)
-
-                    const { data: existing } = await client
-                        .from('products')
-                        .select('id')
-                        .eq('sku', sku)
-                        .eq('business_id', businessId)
-                        .maybeSingle()
-
-                    if (existing) {
-                        results.errors.push({ row: rowNum, error: `Ya existe un producto con el SKU "${sku}"` })
-                        continue
-                    }
-                }
-
-                if (barcode) {
-                    const barcodeLower = barcode.toLowerCase()
-                    if (seenBarcodes.has(barcodeLower)) {
-                        results.errors.push({ row: rowNum, error: `Código de barras duplicado en el mismo archivo: "${barcode}"` })
-                        continue
-                    }
-                    seenBarcodes.add(barcodeLower)
-
-                    const { data: existing } = await client
-                        .from('products')
-                        .select('id')
-                        .eq('barcode', barcode)
-                        .eq('business_id', businessId)
-                        .maybeSingle()
-
-                    if (existing) {
-                        results.errors.push({ row: rowNum, error: `Ya existe un producto con el código de barras "${barcode}"` })
-                        continue
-                    }
-                }
-
-                let categoryId = null
-                if (categoryName) {
-                    const lowerName = categoryName.toLowerCase()
-                    if (categoryMap[lowerName]) {
-                        categoryId = categoryMap[lowerName]
-                    } else {
-                        const { data: newCat, error: catError } = await client
-                            .from('categories')
-                            .insert({ business_id: businessId, name: categoryName })
-                            .select('id, name')
-                            .single()
-
-                        if (catError) {
-                            results.errors.push({ row: rowNum, error: `Error al crear categoría "${categoryName}"` })
-                            continue
-                        }
-                        categoryId = newCat.id
-                        categoryMap[lowerName] = newCat.id
-                    }
-                }
-
-                const productData = {
-                    business_id: businessId,
-                    name,
-                    price,
-                    sku: sku || null,
-                    barcode: parseBarcode(barcode || null),
-                    unit_cost: unitCost,
-                    category_id: categoryId,
-                    track_stock: stock > 0,
-                }
-
-                const { data: product, error: productError } = await client
-                    .from('products')
-                    .insert(productData)
-                    .select('id, name, track_stock')
-                    .single()
-
-                if (productError) {
-                    results.errors.push({ row: rowNum, error: `Error al crear producto: ${productError.message}` })
+                if (!row.price || Number(row.price) <= 0) {
+                    results.errors.push({ row: rowNum, error: 'El precio de la variación debe ser mayor a 0' })
                     continue
                 }
 
-                if (stock > 0) {
-                    const now = new Date()
-                    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-
-                    const { error: movError } = await client
-                        .from('inventory_movements')
-                        .insert({
-                            business_id: businessId,
-                            product_id: product.id,
-                            type: 'entry',
-                            quantity: stock,
-                            unit_cost: unitCost ?? 0,
-                            notes: 'Carga masiva inicial',
-                            created_at: localDate,
-                        })
-
-                    if (movError) {
-                        results.errors.push({ row: rowNum, error: `Producto creado pero error en inventario: ${movError.message}` })
-                    } else {
-                        const { error: stockUpdateError } = await client
-                            .from('inventory')
-                            .update({ stock })
-                            .eq('product_id', product.id)
-
-                        if (stockUpdateError) {
-                            results.errors.push({ row: rowNum, error: `Producto creado pero error al actualizar stock: ${stockUpdateError.message}` })
-                        }
-                    }
+                const key = `${name.toLowerCase()}|${variationType.toLowerCase()}`
+                if (!variationGroups[key]) {
+                    variationGroups[key] = { name, variationType, variations: [] }
                 }
-
-                if (minStock > 0) {
-                    const { error: minStockError } = await client
-                        .from('inventory')
-                        .update({ min_stock: minStock })
-                        .eq('product_id', product.id)
-
-                    if (minStockError) {
-                        results.errors.push({ row: rowNum, error: `Producto creado pero error al actualizar stock mínimo: ${minStockError.message}` })
-                    }
-                }
-
-                results.created++
-            } catch (rowError) {
-                results.errors.push({ row: rowNum, error: rowError.message })
+                variationGroups[key].variations.push({ ...row, variation_name: variationName })
+            } else {
+                await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum)
             }
+        }
+
+        for (const [, group] of Object.entries(variationGroups)) {
+            await createVariationProduct(client, businessId, group, results, categoryMap)
         }
 
         res.json(results)

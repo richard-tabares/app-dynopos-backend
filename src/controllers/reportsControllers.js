@@ -160,7 +160,7 @@ export const getReports = async (req, res) => {
 
             let query = client
                 .from('inventory_movements')
-                .select('*, products(name, sku, barcode)')
+                .select('*, products(name, sku, barcode), product_variations(variation_name)')
                 .eq('business_id', businessId)
 
             if (type) query = query.eq('type', type)
