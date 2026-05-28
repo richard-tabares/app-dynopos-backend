@@ -284,8 +284,6 @@ const createVariationProduct = async (client, businessId, group, results, catego
         return
     }
 
-    await client.from('inventory').delete().eq('product_id', product.id)
-
     if (createdVariations) {
         const localDate = getLocalDate()
         const movInserts = createdVariations
@@ -532,8 +530,7 @@ export const createProduct = async (req, res) => {
                     }
                 }
             }
-            // Delete auto-created inventory row since variations track their own stock
-            await client.from('inventory').delete().eq('product_id', product.id)
+            // Keep auto-created inventory row (stock=0) for future use if variations are disabled
         }
 
         res.status(201).json({ status: 201, message: 'Producto Creado', data: product })
@@ -654,11 +651,6 @@ export const updateProduct = async (req, res) => {
                 }
             }
 
-            // If product has variations, delete auto-created inventory row
-            if (hasVariations) {
-                await client.from('inventory').delete().eq('product_id', ProductId)
-            }
-
             // Re-fetch with variations
             const { data: updatedProduct } = await client
                 .from('products')
@@ -667,6 +659,23 @@ export const updateProduct = async (req, res) => {
                 .single()
 
             return res.json({ status: 200, message: 'Producto Actualizado', data: updatedProduct })
+        }
+
+        const invBusinessId = business_id || product?.business_id
+        if (invBusinessId) {
+            const { data: existingInv } = await client
+                .from('inventory')
+                .select('id')
+                .eq('product_id', ProductId)
+                .maybeSingle()
+            if (!existingInv) {
+                await client.from('inventory').insert({
+                    product_id: ProductId,
+                    business_id: invBusinessId,
+                    stock: 0,
+                    min_stock: 0,
+                })
+            }
         }
 
         res.json({ status: 200, message: 'Producto Actualizado', data: product })

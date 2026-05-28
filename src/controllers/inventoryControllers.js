@@ -145,12 +145,16 @@ export const adjustInventory = async (req, res) => {
             .from('products')
             .select(
                 `id,
+                business_id,
                 name,
                 sku,
+                barcode,
                 price,
                 unit_cost,
                 is_active,
+                track_stock,
                 variation_type,
+                variations_disabled,
                 categories (
                     id,
                     name
