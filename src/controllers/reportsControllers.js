@@ -476,10 +476,10 @@ export const getReports = async (req, res) => {
 
             let items = []
             if (returnIds.length > 0) {
-                const { data: itemsData, error: itemsError } = await client
-                    .from('returns_items')
-                    .select('*, products(name)')
-                    .in('return_id', returnIds)
+                    const { data: itemsData, error: itemsError } = await client
+                        .from('returns_items')
+                        .select('*, products(name), product_variations(variation_name)')
+                        .in('return_id', returnIds)
                 if (itemsError) throw itemsError
                 items = itemsData || []
             }

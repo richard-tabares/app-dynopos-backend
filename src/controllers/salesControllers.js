@@ -19,7 +19,7 @@ export const getSales = async (req, res) => {
 			throw new Error(error.message || JSON.stringify(error))
 		}
 
-		// Build map of returned quantities per (sale_id, product_id)
+		// Build map of returned quantities per (sale_id, product_id, variation_id)
 		const saleIds = sales.map(s => s.id)
 		const returnedPerProduct = {}
 
@@ -36,14 +36,15 @@ export const getSales = async (req, res) => {
 
 				const { data: returnedItems } = await client
 					.from('returns_items')
-					.select('return_id, product_id, quantity')
+					.select('return_id, product_id, variation_id, quantity')
 					.in('return_id', returnIds)
 
 				if (returnedItems) {
 					returnedItems.forEach(item => {
 						const sid = saleOfReturn[item.return_id]
 						if (!returnedPerProduct[sid]) returnedPerProduct[sid] = {}
-						returnedPerProduct[sid][item.product_id] = (returnedPerProduct[sid][item.product_id] || 0) + item.quantity
+						const key = `${item.product_id}_${item.variation_id || ''}`
+						returnedPerProduct[sid][key] = (returnedPerProduct[sid][key] || 0) + item.quantity
 					})
 				}
 			}
@@ -59,7 +60,7 @@ export const getSales = async (req, res) => {
 			salesperson: s.created_by_name || null,
 			items: (s.items || []).map(item => ({
 				...item,
-				already_returned: returnedPerProduct[s.id]?.[item.product_id] || 0
+				already_returned: returnedPerProduct[s.id]?.[`${item.product_id}_${item.variation_id || ''}`] || 0
 			})),
 			itemsCount: s.items_count
 		}))
@@ -401,7 +402,7 @@ export const returnSale = async (req, res) => {
 
 		const { data: originalSalesItems, error: originalItemsError } = await client
 			.from('salesItems')
-			.select('product_id, track_stock, quantity')
+			.select('product_id, track_stock, quantity, variation_id')
 			.eq('sale_id', id)
 
 		if (originalItemsError) {
@@ -420,12 +421,13 @@ export const returnSale = async (req, res) => {
 			const returnIds = previousReturns.map(r => r.id)
 			const { data: returnedItems } = await client
 				.from('returns_items')
-				.select('product_id, quantity')
+				.select('product_id, variation_id, quantity')
 				.in('return_id', returnIds)
 
 			if (returnedItems) {
 				returnedItems.forEach(item => {
-					alreadyReturnedMap[item.product_id] = (alreadyReturnedMap[item.product_id] || 0) + item.quantity
+					const key = `${item.product_id}_${item.variation_id || ''}`
+					alreadyReturnedMap[key] = (alreadyReturnedMap[key] || 0) + item.quantity
 				})
 			}
 		}
@@ -434,12 +436,16 @@ export const returnSale = async (req, res) => {
 		const movements = []
 
 		for (const returnItem of items) {
-			const saleItem = originalSalesItems.find(si => si.product_id === returnItem.product_id)
+			const saleItem = originalSalesItems.find(si =>
+				si.product_id === returnItem.product_id &&
+				(si.variation_id || '') === (returnItem.variation_id || '')
+			)
 			if (!saleItem) {
 				return res.status(400).json({ error: `Producto con ID ${returnItem.product_id} no encontrado en la venta original` })
 			}
 
-			const alreadyReturned = alreadyReturnedMap[returnItem.product_id] || 0
+			const returnKey = `${returnItem.product_id}_${returnItem.variation_id || ''}`
+			const alreadyReturned = alreadyReturnedMap[returnKey] || 0
 			const availableToReturn = (saleItem.quantity || 0) - alreadyReturned
 
 			if (availableToReturn <= 0) {
@@ -562,8 +568,12 @@ export const returnSale = async (req, res) => {
 
 		// Check if all original items were returned (including previous returns)
 		const allReturned = originalSalesItems.every(orig => {
-			const alreadyR = alreadyReturnedMap[orig.product_id] || 0
-			const currentR = items.find(r => r.product_id === orig.product_id)?.quantity || 0
+			const origKey = `${orig.product_id}_${orig.variation_id || ''}`
+			const alreadyR = alreadyReturnedMap[origKey] || 0
+			const currentR = items.find(r =>
+				r.product_id === orig.product_id &&
+				(r.variation_id || '') === (orig.variation_id || '')
+			)?.quantity || 0
 			return (alreadyR + currentR) >= orig.quantity
 		})
 
