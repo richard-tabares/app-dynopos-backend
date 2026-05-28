@@ -398,6 +398,7 @@ const PRODUCT_SELECT = `
     is_active,
     track_stock,
     variation_type,
+    variations_disabled,
     categories (
         id,
         name
@@ -567,7 +568,7 @@ export const updateProduct = async (req, res) => {
             ...productFields,
             sku,
             barcode: req.body.barcode,
-            variation_type: hasVariations ? (variation_type || null) : null,
+            variation_type: variation_type || null,
             price: hasVariations ? 0 : productFields.price,
             unit_cost: hasVariations ? 0 : productFields.unit_cost,
         }
@@ -583,7 +584,7 @@ export const updateProduct = async (req, res) => {
         const product = data[0]
 
         // Handle variations
-        if (variations !== undefined) {
+        if (variations !== undefined && variations.length > 0) {
             // Delete removed variations
             const keepIds = variations.filter(v => v.id).map(v => v.id)
             if (keepIds.length > 0) {
@@ -593,10 +594,17 @@ export const updateProduct = async (req, res) => {
                     .eq('product_id', ProductId)
                     .not('id', 'in', `(${keepIds.map(id => `'${id}'`).join(',')})`)
             } else {
-                await client
+                const { error: deleteErr } = await client
                     .from('product_variations')
                     .delete()
                     .eq('product_id', ProductId)
+
+                if (deleteErr && deleteErr.code === '23503') {
+                    await client
+                        .from('product_variations')
+                        .update({ is_active: false })
+                        .eq('product_id', ProductId)
+                }
             }
 
             // Upsert variations
