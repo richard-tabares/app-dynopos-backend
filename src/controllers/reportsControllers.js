@@ -106,26 +106,36 @@ export const getReports = async (req, res) => {
 
             const { data: salesItemsData, error: itemsErr } = await client
                 .from('salesItems')
-                .select('product_id, unit_cost, quantity, subtotal, products(name)')
+                .select('product_id, variation_id, variation_name, unit_cost, quantity, subtotal, products(name)')
                 .in('sale_id', saleIds)
 
             if (itemsErr) throw itemsErr
 
             const productAgg = {}
             for (const item of salesItemsData || []) {
-                const pid = item.product_id
-                if (!productAgg[pid]) {
-                    productAgg[pid] = { name: item.products?.name || 'Producto', totalQuantity: 0, totalRevenue: 0, totalCost: 0 }
+                const key = item.variation_id || item.product_id
+                if (!productAgg[key]) {
+                    productAgg[key] = {
+                        id: item.product_id,
+                        name: item.products?.name || 'Producto',
+                        variation_id: item.variation_id,
+                        variation_name: item.variation_name,
+                        totalQuantity: 0,
+                        totalRevenue: 0,
+                        totalCost: 0
+                    }
                 }
-                productAgg[pid].totalQuantity += item.quantity
-                productAgg[pid].totalRevenue += item.subtotal
-                productAgg[pid].totalCost += (item.unit_cost || 0) * item.quantity
+                productAgg[key].totalQuantity += item.quantity
+                productAgg[key].totalRevenue += item.subtotal
+                productAgg[key].totalCost += (item.unit_cost || 0) * item.quantity
             }
 
             const productMargins = Object.entries(productAgg)
-                .map(([id, p]) => ({
-                    id,
+                .map(([, p]) => ({
+                    id: p.id,
                     name: p.name,
+                    variation_id: p.variation_id,
+                    variation_name: p.variation_name,
                     totalQuantity: p.totalQuantity,
                     totalRevenue: p.totalRevenue,
                     totalCost: p.totalCost,
