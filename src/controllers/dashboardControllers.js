@@ -33,7 +33,7 @@ export const getDashboardMetrics = async (req, res) => {
                 .eq('is_active', true),
             client
                 .from('products')
-                .select('id, name, unit_cost, variation_type, variations_disabled, inventory(stock, min_stock), product_variations(id, stock, min_stock, unit_cost, variation_name, is_active)')
+                .select('id, name, variation_type, variations_disabled, product_variations(id, stock, min_stock, unit_cost, variation_name, is_active)')
                 .eq('business_id', businessId)
                 .eq('is_active', true),
             client
@@ -97,57 +97,32 @@ export const getDashboardMetrics = async (req, res) => {
         const todayProfit = todayRevenue - todayCost
         const todayMargin = todayRevenue > 0 ? Math.round((todayProfit / todayRevenue) * 100) : 0
 
-        const hasActiveVariations = (p) => p.variation_type && !p.variations_disabled && p.product_variations?.length > 0
-
         const isProductLowStock = (p) => {
-            if (hasActiveVariations(p)) {
-                return p.product_variations.some(pv =>
-                    pv.is_active !== false && pv.stock <= pv.min_stock && pv.min_stock > 0
-                )
-            }
-            const inv = p.inventory?.[0]
-            return inv && inv.stock <= inv.min_stock && inv.min_stock > 0
+            return (p.product_variations || []).some(pv =>
+                pv.is_active !== false && pv.stock <= pv.min_stock && pv.min_stock > 0
+            )
         }
 
         const stockAlerts = inventoryData.filter(isProductLowStock).length
 
         const inventoryValue = inventoryData.reduce((acc, p) => {
-            if (hasActiveVariations(p)) {
-                return acc + p.product_variations.reduce((sum, pv) => {
-                    return sum + ((pv.stock || 0) * (pv.unit_cost || 0))
-                }, 0)
-            }
-            const stock = p.inventory?.[0]?.stock || 0
-            const cost = p.unit_cost || 0
-            return acc + (stock * cost)
+            return acc + (p.product_variations || []).reduce((sum, pv) => {
+                return sum + ((pv.stock || 0) * (pv.unit_cost || 0))
+            }, 0)
         }, 0)
 
         const sortedLowStock = inventoryData
             .flatMap(p => {
-                if (hasActiveVariations(p)) {
-                    return p.product_variations
-                        .filter(pv => pv.is_active !== false && pv.stock <= pv.min_stock && pv.min_stock > 0)
-                        .map(pv => ({
-                            id: `var_${pv.id}`,
-                            productId: p.id,
-                            name: p.name,
-                            variationName: pv.variation_name,
-                            stock: pv.stock,
-                            min_stock: pv.min_stock
-                        }))
-                }
-                const inv = p.inventory?.[0]
-                if (inv && inv.stock <= inv.min_stock && inv.min_stock > 0) {
-                    return [{
-                        id: p.id,
+                return (p.product_variations || [])
+                    .filter(pv => pv.is_active !== false && pv.stock <= pv.min_stock && pv.min_stock > 0)
+                    .map(pv => ({
+                        id: `var_${pv.id}`,
                         productId: p.id,
                         name: p.name,
-                        variationName: null,
-                        stock: inv.stock,
-                        min_stock: inv.min_stock
-                    }]
-                }
-                return []
+                        variationName: pv.variation_name,
+                        stock: pv.stock,
+                        min_stock: pv.min_stock
+                    }))
             })
             .sort((a, b) => a.stock - b.stock)
             .slice(0, 10)

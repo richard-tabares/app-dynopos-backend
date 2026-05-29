@@ -2,6 +2,38 @@ import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 
 const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
+const getLocalDate = () => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+const PRODUCT_SELECT = `
+    id,
+    business_id,
+    created_at,
+    name,
+    is_active,
+    track_stock,
+    variation_type,
+    variations_disabled,
+    categories (
+        id,
+        name
+    ),
+    product_variations (
+        id,
+        variation_name,
+        price,
+        unit_cost,
+        sku,
+        barcode,
+        stock,
+        is_active,
+        sort_order,
+        min_stock
+    )
+`
+
 export const adjustInventory = async (req, res) => {
     const client = getClient(req)
     const { productId } = req.params
@@ -15,99 +47,63 @@ export const adjustInventory = async (req, res) => {
         return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' })
     }
 
+    if (!variation_id) {
+        return res.status(400).json({ error: 'variation_id es obligatorio' })
+    }
+
     try {
-        const { data: product, error: productError } = await client
-            .from('products')
-            .select(`id, name, business_id, unit_cost, variation_type, inventory(stock, min_stock)`)
-            .eq('id', productId)
+        const { data: variation, error: varFetchError } = await client
+            .from('product_variations')
+            .select('stock, min_stock, unit_cost')
+            .eq('id', variation_id)
             .single()
 
-        if (productError) {
-            console.error('Product fetch error:', productError)
-            throw new Error(productError.message || JSON.stringify(productError))
+        if (varFetchError) {
+            throw new Error(varFetchError.message || JSON.stringify(varFetchError))
         }
 
-        if (variation_id) {
-            const { data: variation, error: varFetchError } = await client
+        const currentStock = variation?.stock || 0
+        const newStock = movement_type === 'entry'
+            ? currentStock + quantity
+            : currentStock - quantity
+
+        if (newStock < 0) {
+            return res.status(400).json({
+                error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
+            })
+        }
+
+        const { error: updateVarError } = await client
+            .from('product_variations')
+            .update({ stock: newStock })
+            .eq('id', variation_id)
+
+        if (updateVarError) {
+            throw new Error(updateVarError.message || JSON.stringify(updateVarError))
+        }
+
+        if (min_stock !== undefined) {
+            const { error: minStockError } = await client
                 .from('product_variations')
-                .select('stock, min_stock')
-                .eq('id', variation_id)
-                .single()
-
-            if (varFetchError) {
-                throw new Error(varFetchError.message || JSON.stringify(varFetchError))
-            }
-
-            const currentStock = variation?.stock || 0
-            const newStock = movement_type === 'entry'
-                ? currentStock + quantity
-                : currentStock - quantity
-
-            if (newStock < 0) {
-                return res.status(400).json({
-                    error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
-                })
-            }
-
-            const { error: updateVarError } = await client
-                .from('product_variations')
-                .update({ stock: newStock })
+                .update({ min_stock })
                 .eq('id', variation_id)
 
-            if (updateVarError) {
-                throw new Error(updateVarError.message || JSON.stringify(updateVarError))
-            }
-
-            if (min_stock !== undefined) {
-                const { error: minStockError } = await client
-                    .from('product_variations')
-                    .update({ min_stock })
-                    .eq('id', variation_id)
-
-                if (minStockError) {
-                    throw new Error(minStockError.message || JSON.stringify(minStockError))
-                }
-            }
-        } else {
-            const currentStock = product.inventory?.[0]?.stock || 0
-            const newStock = movement_type === 'entry'
-                ? currentStock + quantity
-                : currentStock - quantity
-
-            if (newStock < 0) {
-                return res.status(400).json({
-                    error: `Stock insuficiente. Stock actual: ${currentStock}, intentaste sacar: ${quantity}`
-                })
-            }
-
-            const updateFields = { stock: newStock }
-            if (min_stock !== undefined) {
-                updateFields.min_stock = min_stock
-            }
-
-            const { error: updateError } = await client
-                .from('inventory')
-                .update(updateFields)
-                .eq('product_id', productId)
-
-            if (updateError) {
-                console.error('Inventory update error:', updateError)
-                throw new Error(updateError.message || JSON.stringify(updateError))
+            if (minStockError) {
+                throw new Error(minStockError.message || JSON.stringify(minStockError))
             }
         }
 
-        const now = new Date()
-        const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        const localDate = getLocalDate()
 
         const { error: movementError } = await client
             .from('inventory_movements')
             .insert({
-                business_id: business_id || product.business_id,
+                business_id: business_id,
                 product_id: productId,
-                variation_id: variation_id || null,
+                variation_id: variation_id,
                 type: movement_type,
                 quantity,
-                unit_cost: unit_cost ?? product.unit_cost ?? 0,
+                unit_cost: unit_cost ?? variation.unit_cost ?? 0,
                 notes: notes || null,
                 created_at: localDate
             })
@@ -118,62 +114,20 @@ export const adjustInventory = async (req, res) => {
         }
 
         if (unit_cost !== undefined) {
-            if (variation_id) {
-                const { error: costError } = await client
-                    .from('product_variations')
-                    .update({ unit_cost })
-                    .eq('id', variation_id)
+            const { error: costError } = await client
+                .from('product_variations')
+                .update({ unit_cost })
+                .eq('id', variation_id)
 
-                if (costError) {
-                    console.error('Variation cost update error:', costError)
-                    throw new Error(costError.message || JSON.stringify(costError))
-                }
-            } else if (unit_cost !== product.unit_cost) {
-                const { error: costError } = await client
-                    .from('products')
-                    .update({ unit_cost })
-                    .eq('id', productId)
-
-                if (costError) {
-                    console.error('Product cost update error:', costError)
-                    throw new Error(costError.message || JSON.stringify(costError))
-                }
+            if (costError) {
+                console.error('Variation cost update error:', costError)
+                throw new Error(costError.message || JSON.stringify(costError))
             }
         }
 
         const { data: productData, error: fetchError } = await client
             .from('products')
-            .select(
-                `id,
-                business_id,
-                name,
-                sku,
-                barcode,
-                price,
-                unit_cost,
-                is_active,
-                track_stock,
-                variation_type,
-                variations_disabled,
-                categories (
-                    id,
-                    name
-                ),
-                inventory (
-                    stock,
-                    min_stock
-                ),
-                product_variations (
-                    id,
-                    variation_name,
-                    price,
-                    unit_cost,
-                    stock,
-                    is_active,
-                    sort_order,
-                    min_stock
-                )`
-            )
+            .select(PRODUCT_SELECT)
             .eq('id', productId)
             .single()
 
