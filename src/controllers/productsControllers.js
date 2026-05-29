@@ -445,7 +445,7 @@ export const getProductById = async (req, res) => {
 export const createProduct = async (req, res) => {
     try {
         const client = getClient(req)
-        const { sku, business_id, barcode, variations, variation_type, ...productFields } = req.body
+        const { sku, business_id, barcode, variations, variation_type, initial_stock, min_stock_inicial, ...productFields } = req.body
         req.body.barcode = parseBarcode(barcode)
 
         if (sku) {
@@ -532,6 +532,45 @@ export const createProduct = async (req, res) => {
                 }
             }
             // Keep auto-created inventory row (stock=0) for future use if variations are disabled
+        } else {
+            // Handle initial stock and min stock for simple products
+            const initStock = Number(initial_stock) || 0
+            const initMinStock = Number(min_stock_inicial) || 0
+
+            if (initStock > 0 || initMinStock > 0) {
+                const localDate = getLocalDate()
+
+                if (initStock > 0) {
+                    await client.from('inventory_movements').insert({
+                        business_id,
+                        product_id: product.id,
+                        type: 'entry',
+                        quantity: initStock,
+                        unit_cost: product.unit_cost ?? 0,
+                        notes: 'Stock inicial',
+                        created_at: localDate,
+                    })
+
+                    await client.from('inventory').update({ stock: initStock }).eq('product_id', product.id)
+
+                    if (product.track_stock !== true) {
+                        await client.from('products').update({ track_stock: true }).eq('id', product.id)
+                        product.track_stock = true
+                    }
+                }
+
+                if (initMinStock > 0) {
+                    const { data: invRow } = await client
+                        .from('inventory')
+                        .select('id')
+                        .eq('product_id', product.id)
+                        .maybeSingle()
+
+                    if (invRow) {
+                        await client.from('inventory').update({ min_stock: initMinStock }).eq('product_id', product.id)
+                    }
+                }
+            }
         }
 
         res.status(201).json({ status: 201, message: 'Producto Creado', data: product })
