@@ -269,6 +269,19 @@ const createVariationProduct = async (client, businessId, group, results, catego
         return
     }
 
+    await client
+        .from('product_variations')
+        .insert({
+            product_id: product.id,
+            variation_name: 'Default',
+            price: 0,
+            unit_cost: 0,
+            stock: 0,
+            min_stock: 0,
+            is_active: false,
+            sort_order: 0,
+        })
+
     const variationInserts = variations.map((v, i) => ({
         product_id: product.id,
         variation_name: String(v.variation_name || '').trim(),
@@ -278,7 +291,7 @@ const createVariationProduct = async (client, businessId, group, results, catego
         barcode: parseBarcode(v.barcode ? String(v.barcode).trim() : null),
         stock: Number(v.stock) || 0,
         min_stock: Number(v.min_stock) || 0,
-        sort_order: i,
+        sort_order: i + 1,
         is_active: true,
     }))
 
