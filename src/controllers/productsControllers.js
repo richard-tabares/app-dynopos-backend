@@ -160,6 +160,7 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
             name,
             category_id: categoryId,
             track_stock: stock > 0,
+            variations_disabled: true,
         })
         .select('id, name, track_stock')
         .single()
