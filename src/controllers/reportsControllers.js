@@ -93,15 +93,17 @@ export const getReports = async (req, res) => {
 
             const { data: products, error: prodError } = await client
                 .from('products')
-                .select(`id, name, unit_cost, inventory(stock)`)
+                .select(`id, name, product_variations(id, unit_cost, stock)`)
                 .eq('business_id', businessId)
                 .eq('is_active', true)
 
             if (prodError) throw prodError
 
             const inventoryValue = products.reduce((acc, p) => {
-                const stock = p.inventory?.[0]?.stock || 0
-                return acc + (stock * (p.unit_cost || 0))
+                const variations = p.product_variations || []
+                return acc + variations.reduce((sum, v) => {
+                    return sum + ((v.stock || 0) * (v.unit_cost || 0))
+                }, 0)
             }, 0)
 
             const { data: salesItemsData, error: itemsErr } = await client
@@ -170,7 +172,7 @@ export const getReports = async (req, res) => {
 
             let query = client
                 .from('inventory_movements')
-                .select('*, products(name, sku, barcode), product_variations(variation_name)')
+                .select('*, products(name), product_variations(variation_name, sku, barcode)')
                 .eq('business_id', businessId)
 
             if (type) query = query.eq('type', type)
@@ -478,7 +480,7 @@ export const getReports = async (req, res) => {
             if (returnIds.length > 0) {
                     const { data: itemsData, error: itemsError } = await client
                         .from('returns_items')
-                        .select('*, products(name), product_variations(variation_name)')
+                .select('*, products(name), product_variations(variation_name, sku, barcode)')
                         .in('return_id', returnIds)
                 if (itemsError) throw itemsError
                 items = itemsData || []
