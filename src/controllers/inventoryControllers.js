@@ -13,7 +13,6 @@ const PRODUCT_SELECT = `
     created_at,
     name,
     is_active,
-    track_stock,
     variation_type,
     variations_disabled,
     categories (
@@ -30,7 +29,8 @@ const PRODUCT_SELECT = `
         stock,
         is_active,
         sort_order,
-        min_stock
+        min_stock,
+        track_stock
     )
 `
 

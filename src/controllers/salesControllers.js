@@ -89,7 +89,7 @@ export const createSale = async (req, res) => {
 
 		const { data: variations, error: varError } = await client
 			.from('product_variations')
-			.select('id, product_id, variation_name, price, unit_cost, stock')
+			.select('id, product_id, variation_name, price, unit_cost, stock, track_stock')
 			.in('id', variationIds)
 
 		if (varError) throw new Error(varError.message || JSON.stringify(varError))
@@ -97,25 +97,22 @@ export const createSale = async (req, res) => {
 		const productIds = [...new Set(salesItems.map(item => item.product_id))]
 		const { data: products, error: productsError } = await client
 			.from('products')
-			.select('id, name, track_stock')
+			.select('id, name')
 			.in('id', productIds)
 
 		if (productsError) throw new Error(productsError.message || JSON.stringify(productsError))
 
 		for (const item of salesItems) {
-			const product = products.find(p => p.id === item.product_id)
-			if (!product) {
-				return res.status(400).json({ error: `Producto con ID ${item.product_id} no encontrado` })
-			}
-			if (product.track_stock === false) continue
-
 			const variation = variations.find(v => v.id === item.variation_id)
 			if (!variation) {
 				return res.status(400).json({ error: `Variación con ID ${item.variation_id} no encontrada` })
 			}
+			if (variation.track_stock === false) continue
+
+			const product = products.find(p => p.id === item.product_id)
 			if (item.quantity > variation.stock) {
 				return res.status(400).json({
-					error: `La variación ${product.name} - ${variation.variation_name} no tiene stock suficiente, stock actual es ${variation.stock}`,
+					error: `La variación ${product?.name || item.product_id} - ${variation.variation_name} no tiene stock suficiente, stock actual es ${variation.stock}`,
 				})
 			}
 		}
@@ -134,6 +131,7 @@ export const createSale = async (req, res) => {
 				unit_cost: unitCost,
 				subtotal,
 				variation_name: variation.variation_name,
+				track_stock: variation.track_stock,
 			}
 		})
 
@@ -176,10 +174,8 @@ export const createSale = async (req, res) => {
 
 		const movements = []
 		for (const item of itemsWithPrices) {
-			const product = products.find(p => p.id === item.product_id)
-			if (product.track_stock === false) continue
-
 			const variation = variations.find(v => v.id === item.variation_id)
+			if (!variation || variation.track_stock === false) continue
 			const newStock = (variation?.stock || 0) - item.quantity
 
 			const { error: updateVarError } = await client

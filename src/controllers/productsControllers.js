@@ -159,10 +159,9 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
             business_id: businessId,
             name,
             category_id: categoryId,
-            track_stock: stock > 0,
             variations_disabled: true,
         })
-        .select('id, name, track_stock')
+        .select('id, name')
         .single()
 
     if (productError) {
@@ -181,6 +180,7 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
             barcode: parseBarcode(barcode || null),
             stock,
             min_stock: minStock,
+            track_stock: stock > 0,
             is_active: true,
             sort_order: 0,
         })
@@ -259,7 +259,6 @@ const createVariationProduct = async (client, businessId, group, results, catego
             business_id: businessId,
             name: productName,
             category_id: categoryId,
-            track_stock: true,
             variation_type: variationType,
         })
         .select('id, name')
@@ -292,6 +291,7 @@ const createVariationProduct = async (client, businessId, group, results, catego
         barcode: parseBarcode(v.barcode ? String(v.barcode).trim() : null),
         stock: Number(v.stock) || 0,
         min_stock: Number(v.min_stock) || 0,
+        track_stock: true,
         sort_order: i + 1,
         is_active: true,
     }))
@@ -412,7 +412,6 @@ const PRODUCT_SELECT = `
     created_at,
     name,
     is_active,
-    track_stock,
     variation_type,
     variations_disabled,
     categories (
@@ -429,7 +428,8 @@ const PRODUCT_SELECT = `
         stock,
         is_active,
         sort_order,
-        min_stock
+        min_stock,
+        track_stock
     )
 `
 
@@ -459,7 +459,7 @@ export const getProductById = async (req, res) => {
 export const createProduct = async (req, res) => {
     try {
         const client = getClient(req)
-        const { sku, business_id, barcode, variations, variation_type, initial_stock, min_stock_inicial, price, unit_cost, ...productFields } = req.body
+        const { sku, business_id, barcode, variations, variation_type, initial_stock, min_stock_inicial, price, unit_cost, track_stock, ...productFields } = req.body
 
         if (sku) {
             const { data: existing } = await client
@@ -521,6 +521,7 @@ export const createProduct = async (req, res) => {
                 barcode: parseBarcode(v.barcode || null),
                 stock: v.stock || 0,
                 min_stock: v.min_stock || 0,
+                track_stock: v.track_stock ?? true,
                 sort_order: i + 1,
                 is_active: v.is_active !== false,
             }))
@@ -537,24 +538,18 @@ export const createProduct = async (req, res) => {
 
             product.product_variations = [defaultVarData, ...(createdVariations || [])]
 
-            const hasStock = variations.some(v => Number(v.stock) > 0)
-            if (hasStock) {
-                await client.from('products').update({ track_stock: true }).eq('id', product.id)
-                product.track_stock = true
-
-                for (const v of createdVariations || []) {
-                    if (v.stock > 0) {
-                        await client.from('inventory_movements').insert({
-                            business_id,
-                            product_id: product.id,
-                            variation_id: v.id,
-                            type: 'entry',
-                            quantity: v.stock,
-                            unit_cost: v.unit_cost ?? 0,
-                            notes: 'Stock inicial de variación',
-                            created_at: localDate,
-                        })
-                    }
+            for (const v of createdVariations || []) {
+                if (v.stock > 0) {
+                    await client.from('inventory_movements').insert({
+                        business_id,
+                        product_id: product.id,
+                        variation_id: v.id,
+                        type: 'entry',
+                        quantity: v.stock,
+                        unit_cost: v.unit_cost ?? 0,
+                        notes: 'Stock inicial de variación',
+                        created_at: localDate,
+                    })
                 }
             }
         } else {
@@ -572,6 +567,7 @@ export const createProduct = async (req, res) => {
                     barcode: parseBarcode(barcode || null),
                     stock: initStock,
                     min_stock: initMinStock,
+                    track_stock: track_stock ?? true,
                     is_active: true,
                     sort_order: 0,
                 })
@@ -586,9 +582,6 @@ export const createProduct = async (req, res) => {
             product.product_variations = [defaultVariation]
 
             if (initStock > 0) {
-                await client.from('products').update({ track_stock: true }).eq('id', product.id)
-                product.track_stock = true
-
                 await client.from('inventory_movements').insert({
                     business_id,
                     product_id: product.id,
@@ -612,7 +605,7 @@ export const updateProduct = async (req, res) => {
     try {
         const client = getClient(req)
         const { ProductId } = req.params
-        const { sku, business_id, barcode, variations, variation_type, price, unit_cost, initial_stock, min_stock_inicial, ...productFields } = req.body
+        const { sku, business_id, barcode, variations, variation_type, price, unit_cost, initial_stock, min_stock_inicial, track_stock, ...productFields } = req.body
 
         if (sku && business_id) {
             const { data: existing } = await client
@@ -673,6 +666,7 @@ export const updateProduct = async (req, res) => {
                     barcode: parseBarcode(v.barcode || null),
                     stock: v.stock || 0,
                     min_stock: v.min_stock || 0,
+                    track_stock: v.track_stock ?? true,
                     sort_order: i + 1,
                     is_active: v.is_active !== false,
                 }
@@ -738,6 +732,7 @@ export const updateProduct = async (req, res) => {
                 if (barcode !== undefined) varUpdate.barcode = parseBarcode(barcode)
                 if (initial_stock !== undefined) varUpdate.stock = Number(initial_stock)
                 if (min_stock_inicial !== undefined) varUpdate.min_stock = Number(min_stock_inicial)
+                if (track_stock !== undefined) varUpdate.track_stock = track_stock
                 varUpdate.is_active = true
 
                 await client
@@ -756,6 +751,7 @@ export const updateProduct = async (req, res) => {
                         barcode: parseBarcode(barcode || null),
                         stock: Number(initial_stock) || 0,
                         min_stock: Number(min_stock_inicial) || 0,
+                        track_stock: track_stock ?? true,
                         is_active: true,
                         sort_order: 0,
                     })
@@ -789,6 +785,7 @@ export const updateProduct = async (req, res) => {
             if (barcode !== undefined) varUpdate.barcode = parseBarcode(barcode)
             if (initial_stock !== undefined) varUpdate.stock = Number(initial_stock)
             if (min_stock_inicial !== undefined) varUpdate.min_stock = Number(min_stock_inicial)
+            if (track_stock !== undefined) varUpdate.track_stock = track_stock
 
             if (Object.keys(varUpdate).length > 0) {
                 await client.from('product_variations').update(varUpdate).eq('id', defaultVar.id)
