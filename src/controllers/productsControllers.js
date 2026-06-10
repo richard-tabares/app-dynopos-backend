@@ -1,6 +1,7 @@
 import XLSX from 'xlsx'
 import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 import { parseBarcode } from '../helpers/barcodeParser.js'
+import { generateSku, generateBatchSkus } from '../helpers/skuGenerator.js'
 
 const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
@@ -169,14 +170,19 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
         return
     }
 
+    const resolvedSku = sku || await generateSku(client, businessId, name)
+
+    if (!sku && resolvedSku) results.autoSkusCreated = (results.autoSkusCreated || 0) + 1
+
     const { data: defaultVariation, error: varError } = await client
         .from('product_variations')
         .insert({
             product_id: product.id,
+            business_id: businessId,
             variation_name: 'Default',
             price,
             unit_cost: unitCost ?? 0,
-            sku: sku || null,
+            sku: resolvedSku,
             barcode: parseBarcode(barcode || null),
             stock,
             min_stock: minStock,
@@ -273,6 +279,7 @@ const createVariationProduct = async (client, businessId, group, results, catego
         .from('product_variations')
         .insert({
             product_id: product.id,
+            business_id: businessId,
             variation_name: 'Default',
             price: 0,
             unit_cost: 0,
@@ -280,10 +287,22 @@ const createVariationProduct = async (client, businessId, group, results, catego
             min_stock: 0,
             is_active: false,
             sort_order: 0,
+            sku: await generateSku(client, businessId, productName),
         })
+
+    const emptySkuVars = variations.filter(v => !v.sku)
+    if (emptySkuVars.length > 0) {
+        const autoSkus = await generateBatchSkus(client, businessId, productName, emptySkuVars.length)
+        let skuIdx = 0
+        for (const v of variations) {
+            if (!v.sku) v.sku = autoSkus[skuIdx++]
+        }
+        results.autoSkusCreated = (results.autoSkusCreated || 0) + emptySkuVars.length
+    }
 
     const variationInserts = variations.map((v, i) => ({
         product_id: product.id,
+        business_id: businessId,
         variation_name: String(v.variation_name || '').trim(),
         price: Number(v.price) || 0,
         unit_cost: Number(v.unit_cost) || 0,
@@ -364,7 +383,7 @@ export const bulkCreateProducts = async (req, res) => {
 
         const seenSkus = new Set()
         const seenBarcodes = new Set()
-        const results = { created: 0, errors: [], total: rows.length }
+        const results = { created: 0, errors: [], total: rows.length, autoSkusCreated: 0 }
         const variationGroups = {}
 
         for (let i = 0; i < rows.length; i++) {
@@ -501,6 +520,7 @@ export const createProduct = async (req, res) => {
                 .from('product_variations')
                 .insert({
                     product_id: product.id,
+                    business_id,
                     variation_name: 'Default',
                     price: 0,
                     unit_cost: 0,
@@ -508,12 +528,14 @@ export const createProduct = async (req, res) => {
                     min_stock: 0,
                     is_active: false,
                     sort_order: 0,
+                    sku: await generateSku(client, business_id, productFields.name),
                 })
                 .select()
                 .single()
 
             const variationInserts = variations.map((v, i) => ({
                 product_id: product.id,
+                business_id,
                 variation_name: v.variation_name,
                 price: v.price,
                 unit_cost: v.unit_cost || 0,
@@ -525,6 +547,15 @@ export const createProduct = async (req, res) => {
                 sort_order: i + 1,
                 is_active: v.is_active !== false,
             }))
+
+            const emptySkuVars = variationInserts.filter(v => !v.sku)
+            if (emptySkuVars.length > 0) {
+                const autoSkus = await generateBatchSkus(client, business_id, productFields.name, emptySkuVars.length)
+                let skuIdx = 0
+                for (const vIns of variationInserts) {
+                    if (!vIns.sku) vIns.sku = autoSkus[skuIdx++]
+                }
+            }
 
             const { data: createdVariations, error: varError } = await client
                 .from('product_variations')
@@ -555,15 +586,17 @@ export const createProduct = async (req, res) => {
         } else {
             const initStock = Number(initial_stock) || 0
             const initMinStock = Number(min_stock_inicial) || 0
+            const resolvedSku = sku || await generateSku(client, business_id, productFields.name)
 
             const { data: defaultVariation, error: varError } = await client
                 .from('product_variations')
                 .insert({
                     product_id: product.id,
+                    business_id,
                     variation_name: 'Default',
                     price: price ?? 0,
                     unit_cost: unit_cost ?? 0,
-                    sku: sku || null,
+                    sku: resolvedSku,
                     barcode: parseBarcode(barcode || null),
                     stock: initStock,
                     min_stock: initMinStock,
@@ -659,10 +692,10 @@ export const updateProduct = async (req, res) => {
                 const v = variations[i]
                 const varData = {
                     product_id: ProductId,
+                    business_id: product.business_id,
                     variation_name: v.variation_name,
                     price: v.price,
                     unit_cost: v.unit_cost || 0,
-                    sku: v.sku || null,
                     barcode: parseBarcode(v.barcode || null),
                     stock: v.stock || 0,
                     min_stock: v.min_stock || 0,
@@ -672,11 +705,13 @@ export const updateProduct = async (req, res) => {
                 }
 
                 if (v.id) {
+                    if (v.sku) varData.sku = v.sku
                     await client
                         .from('product_variations')
                         .update(varData)
                         .eq('id', v.id)
                 } else {
+                    varData.sku = v.sku || await generateSku(client, product.business_id, product.name || productFields.name)
                     const { data: newVar, error: newVarError } = await client
                         .from('product_variations')
                         .insert(varData)
@@ -744,6 +779,7 @@ export const updateProduct = async (req, res) => {
                     .from('product_variations')
                     .insert({
                         product_id: ProductId,
+                        business_id,
                         variation_name: 'Default',
                         price: price ?? 0,
                         unit_cost: unit_cost ?? 0,
