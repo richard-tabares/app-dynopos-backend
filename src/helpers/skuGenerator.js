@@ -17,15 +17,19 @@ export function extractPrefix(name) {
     return letters.slice(0, PREFIX_LENGTH).padEnd(PREFIX_LENGTH, PAD_CHAR)
 }
 
-async function countPrefix(client, businessId, prefix) {
-    const { count, error } = await client
+async function getMaxSequence(client, businessId, prefix) {
+    const { data, error } = await client
         .from('product_variations')
-        .select('id', { count: 'exact', head: true })
+        .select('sku')
         .eq('business_id', businessId)
         .ilike('sku', `${prefix}-%`)
+        .order('sku', { ascending: false })
+        .limit(1)
 
     if (error) throw error
-    return count || 0
+    if (!data || data.length === 0) return 0
+    const seq = parseInt(data[0].sku.split('-')[1], 10)
+    return isNaN(seq) ? 0 : seq
 }
 
 function formatSku(prefix, n) {
@@ -34,15 +38,15 @@ function formatSku(prefix, n) {
 
 export async function generateSku(client, businessId, productName, retryCount = 0) {
     const prefix = extractPrefix(productName)
-    const count = await countPrefix(client, businessId, prefix)
-    const sku = formatSku(prefix, count + 1 + retryCount)
+    const max = await getMaxSequence(client, businessId, prefix)
+    const sku = formatSku(prefix, max + 1 + retryCount)
     return sku
 }
 
 export async function generateBatchSkus(client, businessId, productName, count) {
     if (count <= 0) return []
     const prefix = extractPrefix(productName)
-    const existing = await countPrefix(client, businessId, prefix)
+    const existing = await getMaxSequence(client, businessId, prefix)
     const skus = []
     for (let i = 0; i < count; i++) {
         skus.push(formatSku(prefix, existing + 1 + i))

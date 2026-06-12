@@ -688,6 +688,15 @@ export const updateProduct = async (req, res) => {
 
             const localDate = getLocalDate()
 
+            const newVarsNoSku = variations.filter(v => !v.id && !v.sku)
+            if (newVarsNoSku.length > 0) {
+                const autoSkus = await generateBatchSkus(client, product.business_id, product.name || productFields.name, newVarsNoSku.length)
+                let skuIdx = 0
+                for (const v of variations) {
+                    if (!v.id && !v.sku) v.sku = autoSkus[skuIdx++]
+                }
+            }
+
             for (let i = 0; i < variations.length; i++) {
                 const v = variations[i]
                 const varData = {
@@ -711,7 +720,7 @@ export const updateProduct = async (req, res) => {
                         .update(varData)
                         .eq('id', v.id)
                 } else {
-                    varData.sku = v.sku || await generateSku(client, product.business_id, product.name || productFields.name)
+                    varData.sku = v.sku
                     const { data: newVar, error: newVarError } = await client
                         .from('product_variations')
                         .insert(varData)
