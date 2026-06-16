@@ -1,17 +1,10 @@
 import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-thermal-printer'
 
-async function downloadImage(url) {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    const arrayBuffer = await response.arrayBuffer()
-    return Buffer.from(arrayBuffer)
-  } catch {
-    return null
-  }
-}
+export function buildTicketBuffer(ticketData) {
+  const WIDTH = ticketData.printerWidth || 32
+  const DETAIL_WIDTH = WIDTH === 32 ? 0.5 : 0.4
+  const TOTAL_WIDTH = WIDTH === 32 ? 0.35 : 0.3
 
-export async function buildTicketBuffer(ticketData) {
   const printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
     interface: {
@@ -21,23 +14,10 @@ export async function buildTicketBuffer(ticketData) {
     characterSet: CharacterSet.PC437_USA,
     breakLine: BreakLine.WORD,
     removeSpecialCharacters: false,
-    width: 42,
+    width: WIDTH,
   })
 
   printer.clear()
-
-  if (ticketData.businessLogo) {
-    const imageBuffer = await downloadImage(ticketData.businessLogo)
-    if (imageBuffer) {
-      printer.alignCenter()
-      try {
-        await printer.printImageBuffer(imageBuffer)
-        printer.newLine()
-      } catch {
-        // skip logo if printing fails
-      }
-    }
-  }
 
   printer.alignCenter()
   printer.setTextSize(1, 1)
@@ -58,8 +38,8 @@ export async function buildTicketBuffer(ticketData) {
   printer.drawLine()
 
   printer.tableCustom([
-    { text: 'Detalle', align: 'LEFT', width: 0.4, bold: true },
-    { text: 'Total', align: 'RIGHT', width: 0.3, bold: true },
+    { text: 'Detalle', align: 'LEFT', width: DETAIL_WIDTH, bold: true },
+    { text: 'Total', align: 'RIGHT', width: TOTAL_WIDTH, bold: true },
   ])
 
   for (const item of (ticketData.items || [])) {
@@ -69,8 +49,8 @@ export async function buildTicketBuffer(ticketData) {
     printer.println(name)
     const line = `${item.quantity}x ${formatCurrency(item.price)}`
     printer.tableCustom([
-      { text: line, align: 'LEFT', width: 0.4 },
-      { text: formatCurrency(item.subtotal), align: 'RIGHT', width: 0.3 },
+      { text: line, align: 'LEFT', width: DETAIL_WIDTH },
+      { text: formatCurrency(item.subtotal), align: 'RIGHT', width: TOTAL_WIDTH },
     ])
   }
 
@@ -85,12 +65,14 @@ export async function buildTicketBuffer(ticketData) {
   printer.alignCenter()
   printer.println(ticketData.footer || 'Gracias por su compra!')
 
+  printer.drawLine()
+  printer.println('¿Quieres un sistema moderno? Bykor.co')
   printer.newLine()
-  printer.setTextNormal()
-  printer.drawLine()
-  printer.bold(true)
-  printer.println('¿Quieres este sistema? Bykor.co')
-  printer.drawLine()
+  printer.underline(true)
+  printer.newLine()
+  printer.printQR("https://bykor.co", { cellSize: 6, correction: 'M', model: 2 })
+  printer.println('Bykor.co')
+  printer.underline(false)
   printer.cut()
   printer.openCashDrawer()
 
