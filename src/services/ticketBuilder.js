@@ -62,6 +62,11 @@ export function buildTicketBuffer(ticketData) {
   printer.println(ticketData.footer || 'Gracias por su compra!')
 
   printer.newLine()
+  printer.setTextNormal()
+  printer.drawLine()
+  printer.bold(true)
+  printer.println('¿Quieres este sistema? Bykor.co')
+  printer.drawLine()
   printer.cut()
   printer.openCashDrawer()
 
