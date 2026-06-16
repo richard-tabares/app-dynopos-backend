@@ -43,8 +43,9 @@ export function buildTicketBuffer(ticketData) {
       ? `${item.name} - ${item.variationName}`
       : item.name
     printer.println(name)
+    const line = `${item.quantity}x ${formatCurrency(item.price)}`
     printer.tableCustom([
-      { text: `${item.quantity}x ${formatCurrency(item.price)}`, align: 'LEFT', width: 0.4 },
+      { text: line, align: 'LEFT', width: 0.4 },
       { text: formatCurrency(item.subtotal), align: 'RIGHT', width: 0.3 },
     ])
   }
