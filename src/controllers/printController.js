@@ -8,7 +8,7 @@ export const buildTicket = async (req, res) => {
       return res.status(400).json({ error: 'Se requiere ticketData' })
     }
 
-    const buffer = buildTicketBuffer(ticketData)
+    const buffer = await buildTicketBuffer(ticketData)
     const base64 = buffer.toString('base64')
 
     res.json({ base64 })

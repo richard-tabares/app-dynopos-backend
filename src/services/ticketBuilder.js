@@ -1,6 +1,17 @@
 import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-thermal-printer'
 
-export function buildTicketBuffer(ticketData) {
+async function downloadImage(url) {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const arrayBuffer = await response.arrayBuffer()
+    return Buffer.from(arrayBuffer)
+  } catch {
+    return null
+  }
+}
+
+export async function buildTicketBuffer(ticketData) {
   const printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
     interface: {
@@ -14,6 +25,19 @@ export function buildTicketBuffer(ticketData) {
   })
 
   printer.clear()
+
+  if (ticketData.businessLogo) {
+    const imageBuffer = await downloadImage(ticketData.businessLogo)
+    if (imageBuffer) {
+      printer.alignCenter()
+      try {
+        await printer.printImageBuffer(imageBuffer)
+        printer.newLine()
+      } catch {
+        // skip logo if printing fails
+      }
+    }
+  }
 
   printer.alignCenter()
   printer.setTextSize(1, 1)

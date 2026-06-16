@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js'
+import { supabase, serviceRoleSupabase } from '../config/supabase.js'
 
 const getClient = (req) => req.supabase || supabase
 
@@ -102,7 +102,7 @@ export const uploadBusinessLogo = async (req, res) => {
         const ext = file.originalname.split('.').pop()
         const fileName = `logos/${id}-${Date.now()}.${ext}`
 
-        const { error: uploadError } = await client.storage
+        const { error: uploadError } = await serviceRoleSupabase.storage
             .from('logos')
             .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true })
 
