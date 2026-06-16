@@ -2,8 +2,8 @@ import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-ther
 
 export function buildTicketBuffer(ticketData) {
   const WIDTH = ticketData.printerWidth || 32
-  const DETAIL_WIDTH = WIDTH === 32 ? 0.5 : 0.4
-  const TOTAL_WIDTH = WIDTH === 32 ? 0.35 : 0.3
+  const DETAIL_WIDTH = WIDTH === 32 ? 0.5 : 0.5
+  const TOTAL_WIDTH = WIDTH === 32 ? 0.5 : 0.5
 
   const printer = new ThermalPrinter({
     type: PrinterTypes.EPSON,
