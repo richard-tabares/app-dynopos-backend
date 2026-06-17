@@ -77,13 +77,14 @@ export function buildTicketBuffer(ticketData) {
     printer.newLine()
     printer.alignCenter()
     printer.println(ticketData.footer || 'Gracias por su compra!')
+    printer.newLine()
 
     printer.drawLine()
-    printer.println('¿Quieres un sistema moderno? Bykor.co')
     printer.newLine()
+    printer.println('¿Quieres un sistema rápido y moderno para tu negocio?')
     printer.newLine()
     printer.printQR('https://bykor.co', {
-        cellSize: 6,
+        cellSize: 4,
         correction: 'M',
         model: 2,
     })
