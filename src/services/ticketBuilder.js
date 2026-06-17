@@ -69,11 +69,16 @@ export function buildTicketBuffer(ticketData) {
 
     printer.drawLine()
 
-    printer.setTextSize(1, 1)
-    printer.println('TOTAL')
-    printer.println(formatCurrency(ticketData.total))
-
-    printer.setTextNormal()
+   printer.tableCustom([
+        { text: 'Total', align: 'LEFT', width: DETAIL_WIDTH, bold: true },
+        {
+            text: formatCurrency(ticketData.total),
+            align: 'RIGHT',
+            width: TOTAL_WIDTH,
+            bold: true,
+        },
+   ])
+    
     printer.newLine()
     printer.alignCenter()
     printer.println(ticketData.footer || 'Gracias por su compra!')
@@ -84,13 +89,13 @@ export function buildTicketBuffer(ticketData) {
     printer.println('¿Quieres un sistema rápido y moderno para tu negocio?')
     printer.newLine()
     printer.printQR('https://bykor.co', {
-        cellSize: 4,
+        cellSize: 5,
         correction: 'M',
         model: 2,
     })
     printer.println('Bykor.co')
-    // printer.partialCut()
-    // printer.openCashDrawer()
+    printer.cut()
+    printer.openCashDrawer()
 
     const buffer = printer.getBuffer()
     if (!buffer || buffer.length === 0) {
