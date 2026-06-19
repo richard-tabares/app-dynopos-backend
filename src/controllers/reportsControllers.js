@@ -168,7 +168,7 @@ export const getReports = async (req, res) => {
         }
 
         if (section === 'movements') {
-            const { type, startDate: mStart, endDate: mEnd, limit = 100 } = req.query
+            const { type, startDate: mStart, endDate: mEnd, limit } = req.query
 
             let query = client
                 .from('inventory_movements')
@@ -179,9 +179,11 @@ export const getReports = async (req, res) => {
             if (mStart) query = query.gte('created_at', mStart)
             if (mEnd) query = query.lte('created_at', mEnd)
 
+            query = query.order('created_at', { ascending: false })
+
+            if (limit) query = query.limit(parseInt(limit))
+
             const { data, error } = await query
-                .order('created_at', { ascending: false })
-                .limit(parseInt(limit))
 
             if (error) throw error
 
