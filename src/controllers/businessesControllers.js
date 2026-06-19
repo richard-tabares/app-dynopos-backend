@@ -124,3 +124,41 @@ export const uploadBusinessLogo = async (req, res) => {
         res.status(500).json({ error: error.message })
     }
 }
+
+export const deleteBusinessLogo = async (req, res) => {
+    const client = getClient(req)
+    const { id } = req.params
+    try {
+        const { data: business, error: fetchError } = await client
+            .from('businesses')
+            .select('business_logo')
+            .eq('user_id', id)
+            .single()
+        if (fetchError) throw new Error(fetchError)
+
+        if (business?.business_logo) {
+            const url = new URL(business.business_logo)
+            const pathParts = url.pathname.split('/')
+            const publicIndex = pathParts.indexOf('public')
+            if (publicIndex !== -1) {
+                const filePath = pathParts.slice(publicIndex + 2).join('/')
+                const { error: deleteError } = await serviceRoleSupabase.storage
+                    .from('logos')
+                    .remove([filePath])
+                if (deleteError) console.error('Error al eliminar archivo del storage:', deleteError)
+            }
+        }
+
+        const { data: updated, error: updateError } = await client
+            .from('businesses')
+            .update({ business_logo: null })
+            .eq('user_id', id)
+            .select()
+            .single()
+        if (updateError) throw new Error(updateError)
+
+        res.json({ status: 200, message: 'Logo eliminado', data: updated })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+}
