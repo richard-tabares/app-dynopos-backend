@@ -120,6 +120,7 @@ export const getDashboardMetrics = async (req, res) => {
                         productId: p.id,
                         name: p.name,
                         variationName: pv.variation_name,
+                        variationType: p.variation_type,
                         stock: pv.stock,
                         min_stock: pv.min_stock
                     }))
