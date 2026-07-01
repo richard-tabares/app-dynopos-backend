@@ -465,27 +465,26 @@ export const getReports = async (req, res) => {
         }
 
         if (section === 'return_detail') {
-            const { returnDate } = req.query
-            if (!returnDate) {
-                return res.status(400).json({ error: 'returnDate es requerido' })
+            const { returnId } = req.query
+            if (!returnId) {
+                return res.status(400).json({ error: 'returnId es requerido' })
             }
 
             const { data: returns, error: returnsError } = await client
                 .from('returns')
                 .select('*, salesTickets(ticket_number)')
-                .eq('business_id', businessId)
-                .eq('created_at', returnDate)
+                .eq('id', returnId)
 
             if (returnsError) throw returnsError
 
-            const returnIds = returns.map(r => r.id)
+            const returnData = returns?.[0] || null
 
             let items = []
-            if (returnIds.length > 0) {
-                    const { data: itemsData, error: itemsError } = await client
-                        .from('returns_items')
-                .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode)')
-                        .in('return_id', returnIds)
+            if (returnData) {
+                const { data: itemsData, error: itemsError } = await client
+                    .from('returns_items')
+                    .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode)')
+                    .eq('return_id', returnData.id)
                 if (itemsError) throw itemsError
                 items = itemsData || []
             }
@@ -493,7 +492,7 @@ export const getReports = async (req, res) => {
             return res.json({
                 section: 'return_detail',
                 data: {
-                    returns: returns || [],
+                    returns: returnData ? [returnData] : [],
                     items: items || []
                 }
             })
