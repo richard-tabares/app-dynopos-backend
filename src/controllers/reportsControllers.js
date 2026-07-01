@@ -20,23 +20,26 @@ export const getReports = async (req, res) => {
         const { section = 'sales', filter = 'month', startDate, endDate, categoryId } = req.query
         const client = getClient(req)
 
-        const now = new Date()
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())
+        const [y, m, d] = todayStr.split('-').map(Number)
+        const bogotaMidnight = new Date(Date.UTC(y, m - 1, d))
+
         let start = ''
         let end = ''
 
         if (filter === 'day') {
-            start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-            end = start
+            start = todayStr
+            end = todayStr
         } else if (filter === 'week') {
-            const weekAgo = new Date()
-            weekAgo.setDate(weekAgo.getDate() - 7)
-            start = `${weekAgo.getFullYear()}-${String(weekAgo.getMonth() + 1).padStart(2, '0')}-${String(weekAgo.getDate()).padStart(2, '0')}`
-            end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+            const weekAgo = new Date(bogotaMidnight)
+            weekAgo.setUTCDate(weekAgo.getUTCDate() - 7)
+            start = weekAgo.toISOString().slice(0, 10)
+            end = todayStr
         } else if (filter === 'month') {
-            const monthAgo = new Date()
-            monthAgo.setMonth(monthAgo.getMonth() - 1)
-            start = `${monthAgo.getFullYear()}-${String(monthAgo.getMonth() + 1).padStart(2, '0')}-${String(monthAgo.getDate()).padStart(2, '0')}`
-            end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+            const monthAgo = new Date(bogotaMidnight)
+            monthAgo.setUTCMonth(monthAgo.getUTCMonth() - 1)
+            start = monthAgo.toISOString().slice(0, 10)
+            end = todayStr
         } else if (filter === 'range') {
             start = startDate
             end = endDate
