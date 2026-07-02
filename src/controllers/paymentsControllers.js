@@ -213,7 +213,7 @@ export const webhook = async (req, res) => {
           const newEnd = addPeriod(sub.current_period_end, sub.billing_frequency)
           await serviceRoleSupabase
             .from('subscriptions')
-            .update({ current_period_end: newEnd, failed_attempts: 0, status: 'active', updated_at: new Date() })
+            .update({ current_period_end: newEnd, past_due_at: null, status: 'active', updated_at: new Date() })
             .eq('id', sub.id)
 
           if (business) {
@@ -227,12 +227,9 @@ export const webhook = async (req, res) => {
             }))
           }
         } else if (transaction.status === 'DECLINED') {
-          const newAttempts = (sub.failed_attempts || 0) + 1
-          const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
-          if (newAttempts >= 5) updateData.status = 'expired'
           await serviceRoleSupabase
             .from('subscriptions')
-            .update(updateData)
+            .update({ updated_at: new Date() })
             .eq('id', sub.id)
 
           if (business) {
@@ -242,7 +239,6 @@ export const webhook = async (req, res) => {
               amount: pendingTx.amount,
               billingFrequency: sub.billing_frequency,
               reference: transaction.reference,
-              failedAttempts: newAttempts,
               periodEnd: sub.current_period_end,
             }))
           }

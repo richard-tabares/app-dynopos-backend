@@ -2,6 +2,8 @@ import { serviceRoleSupabase } from '../config/supabase.js'
 import * as wompiService from './wompiService.js'
 import { sendEmail, buildRenewalSuccessEmail, buildRenewalFailedEmail } from './emailService.js'
 
+const GRACE_PERIOD_DAYS = 7
+
 const calculateAmount = (monthlyPrice, billingFrequency) => {
   if (billingFrequency === 'annual') return Math.round(monthlyPrice * 12 * 0.9)
   if (billingFrequency === 'quarterly') return monthlyPrice * 3
@@ -14,6 +16,11 @@ const addPeriod = (date, frequency) => {
   else if (frequency === 'quarterly') d.setMonth(d.getMonth() + 3)
   else d.setMonth(d.getMonth() + 1)
   return d.toISOString().split('T')[0]
+}
+
+const getDaysPastDue = (pastDueAt) => {
+  if (!pastDueAt) return 0
+  return Math.floor((Date.now() - new Date(pastDueAt).getTime()) / (1000 * 60 * 60 * 24))
 }
 
 export const renewSubscription = async (subscription) => {
@@ -86,7 +93,12 @@ export const renewSubscription = async (subscription) => {
 
       await serviceRoleSupabase
         .from('subscriptions')
-        .update({ current_period_end: newEnd, failed_attempts: 0, status: 'active', updated_at: new Date() })
+        .update({
+          current_period_end: newEnd,
+          status: 'active',
+          past_due_at: null,
+          updated_at: new Date(),
+        })
         .eq('id', subscription.id)
 
       await serviceRoleSupabase
@@ -112,61 +124,38 @@ export const renewSubscription = async (subscription) => {
       return { status: 'renewed' }
     }
 
-    if (txStatus === 'DECLINED') {
-      const newAttempts = (subscription.failed_attempts || 0) + 1
-      const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
-      if (newAttempts >= 5) updateData.status = 'expired'
-
-      await serviceRoleSupabase
-        .from('payment_transactions')
-        .update({ status: 'declined', wompi_transaction_id: txId, updated_at: new Date() })
-        .eq('reference', reference)
-
-      await serviceRoleSupabase
-        .from('subscriptions')
-        .update(updateData)
-        .eq('id', subscription.id)
-
-      console.log(`[Renovación] Transacción declinada para ${business.business_name}, enviando correo de fallo...`)
-      await sendEmail(buildRenewalFailedEmail({
-        businessName: business.business_name,
-        email: business.email,
-        amount,
-        billingFrequency: subscription.billing_frequency,
-        reference,
-        failedAttempts: newAttempts,
-        periodEnd: subscription.current_period_end,
-      }))
-
-      return { status: 'declined', failed_attempts: newAttempts }
-    }
-
     await serviceRoleSupabase
       .from('payment_transactions')
       .update({
+        status: 'declined',
         wompi_transaction_id: txId,
         wompi_response: JSON.stringify(transaction),
         updated_at: new Date(),
       })
       .eq('reference', reference)
 
-    return { status: 'pending' }
+    console.log(`[Renovación] Transacción declinada para ${business.business_name}, enviando correo de fallo...`)
+    await sendEmail(buildRenewalFailedEmail({
+      businessName: business.business_name,
+      email: business.email,
+      amount,
+      billingFrequency: subscription.billing_frequency,
+      reference,
+      periodEnd: subscription.current_period_end,
+    }))
+
+    return { status: 'declined' }
   } catch (error) {
     console.error(`Renovación fallida para ${subscription.business_id}:`, error.message)
 
     await serviceRoleSupabase
       .from('payment_transactions')
-      .update({ status: 'declined', wompi_response: JSON.stringify({ error: error.message }), updated_at: new Date() })
+      .update({
+        status: 'declined',
+        wompi_response: JSON.stringify({ error: error.message }),
+        updated_at: new Date(),
+      })
       .eq('reference', reference)
-
-    const newAttempts = (subscription.failed_attempts || 0) + 1
-    const updateData = { failed_attempts: newAttempts, updated_at: new Date() }
-    if (newAttempts >= 5) updateData.status = 'expired'
-
-    await serviceRoleSupabase
-      .from('subscriptions')
-      .update(updateData)
-      .eq('id', subscription.id)
 
     console.log(`[Renovación] Error en catch para ${business.business_name}, enviando correo de fallo...`)
     await sendEmail(buildRenewalFailedEmail({
@@ -175,11 +164,10 @@ export const renewSubscription = async (subscription) => {
       amount,
       billingFrequency: subscription.billing_frequency,
       reference,
-      failedAttempts: newAttempts,
       periodEnd: subscription.current_period_end,
     }))
 
-    return { status: 'error', failed_attempts: newAttempts }
+    return { status: 'error' }
   }
 }
 
@@ -189,24 +177,67 @@ export const renewAllExpired = async () => {
   const { data: expiredSubs } = await serviceRoleSupabase
     .from('subscriptions')
     .select('*')
-    .eq('status', 'active')
-    .eq('auto_renew', true)
+    .in('status', ['active', 'past_due'])
     .lt('current_period_end', today)
 
-  if (!expiredSubs?.length) return { renewed: 0, attempts: 0 }
+  if (!expiredSubs?.length) return { renewed: 0, expired: 0 }
 
   let renewed = 0
-  let attempts = 0
+  let expired = 0
 
   for (const sub of expiredSubs) {
-    if (!sub.wompi_payment_source_id) continue
-    if ((sub.failed_attempts || 0) >= 5) continue
+    const daysPastDue = getDaysPastDue(sub.past_due_at)
+    console.log(daysPastDue)
 
-    const result = await renewSubscription(sub)
-    attempts += result.failed_attempts || 0
-    
-    if (result?.status === 'renewed') renewed++
+    if (sub.status === 'active') {
+      await serviceRoleSupabase
+        .from('subscriptions')
+        .update({ status: 'past_due', past_due_at: new Date(), updated_at: new Date() })
+        .eq('id', sub.id)
+    }
+
+    if (daysPastDue >= GRACE_PERIOD_DAYS) {
+      if (sub.status === 'past_due') {
+        await serviceRoleSupabase
+          .from('subscriptions')
+          .update({ status: 'expired', updated_at: new Date() })
+          .eq('id', sub.id)
+      }
+      expired++
+      continue
+    }
+
+    const { data: business } = await serviceRoleSupabase
+      .from('businesses')
+      .select('business_name, email')
+      .eq('user_id', sub.business_id)
+      .single()
+
+    if (!business) continue
+
+    if (sub.auto_renew && sub.payment_method === 'card') {
+      const result = await renewSubscription(sub)
+      if (result?.status === 'renewed') renewed++
+    } else {
+      const { data: plan } = await serviceRoleSupabase
+        .from('subscription_plans')
+        .select('monthly_price')
+        .eq('id', sub.plan_id)
+        .single()
+
+      const amount = plan ? calculateAmount(plan.monthly_price, sub.billing_frequency) : 0
+      const reference = wompiService.generateReference()
+
+      await sendEmail(buildRenewalFailedEmail({
+        businessName: business.business_name,
+        email: business.email,
+        amount,
+        billingFrequency: sub.billing_frequency,
+        reference,
+        periodEnd: sub.current_period_end,
+      }))
+    }
   }
 
-  return { renewed, attempts }
+  return { renewed, expired }
 }

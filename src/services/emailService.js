@@ -66,7 +66,6 @@ export const buildRenewalFailedEmail = ({
     amount,
     billingFrequency,
     reference,
-    failedAttempts,
     periodEnd,
 }) => ({
     from: `Bykor POS <${FROM_EMAIL}>`,
@@ -93,8 +92,8 @@ export const buildRenewalFailedEmail = ({
         <td style="padding:8px;border:1px solid #ddd;">${new Date(periodEnd).toLocaleDateString('es-CO')}</td>
       </tr>
     </table>
-    <p style="color:#d32f2f;font-weight:bold;">⚠️ Tu plan vence el ${new Date(periodEnd).toLocaleDateString('es-CO')}. Después de 5 diás apartir de tu fecha de vencimiento, sino se efectua el pago tu cuenta será desactivada.</p>
-    <h3>Recuerda actualizar tu método de pago.</h3>
+    <p style="color:#d32f2f;font-weight:bold;">⚠️ Tu plan vence el ${new Date(periodEnd).toLocaleDateString('es-CO')}. Después de 7 días apartir de tu fecha de vencimiento, sino se efectua el pago tu cuenta será desactivada.</p>
+    <h3>Recuerda actualizar tu método de pago o contacta con nuestro equipo de soporte para realizar el pago directamente.</h3>
     <p>Si necesitas actualizar tu método de pago, ingresa a tu panel de administración -> Configuración.</p>
     <br><p>Equipo Bykor POS</p>`,
 })

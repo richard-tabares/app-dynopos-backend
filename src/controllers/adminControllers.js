@@ -83,7 +83,7 @@ export const getClients = async (req, res) => {
 }
 
 export const createClient = async (req, res) => {
-    const { business_name, owner_name, email, phone, password, billing_frequency, plan_id } = req.body
+    const { business_name, owner_name, email, phone, password, billing_frequency, plan_id, payment_method } = req.body
 
     if (!business_name || !owner_name || !email || !phone || !password) {
         return res.status(400).json({ error: 'Todos los campos son requeridos' })
@@ -151,6 +151,8 @@ export const createClient = async (req, res) => {
             billing_frequency: freq,
             current_period_start: periodStart,
             current_period_end: periodEnd,
+            auto_renew: false,
+            payment_method: payment_method === 'card' ? 'card' : 'transfer',
         }) } catch (_) {}
 
         res.status(201).json({
@@ -247,6 +249,7 @@ export const extendSubscription = async (req, res) => {
             .update({
                 current_period_end,
                 status: 'active',
+                past_due_at: null,
                 updated_at: new Date(),
             })
             .eq('id', sub.id)
@@ -273,17 +276,19 @@ export const manualRenewal = async (req, res) => {
         if (!sub) return res.status(404).json({ error: 'Suscripción no encontrada' })
 
         const freq = sub.billing_frequency || 'monthly'
-        const daysMap = { monthly: 30, quarterly: 90, annual: 365 }
-        const now = new Date()
-        const newPeriodStart = now.toISOString().split('T')[0]
-        const newPeriodEnd = new Date(now.getTime() + (daysMap[freq] || 30) * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        const baseDate = sub.current_period_end || new Date().toISOString().split('T')[0]
+        const d = new Date(baseDate)
+        if (freq === 'annual') d.setFullYear(d.getFullYear() + 1)
+        else if (freq === 'quarterly') d.setMonth(d.getMonth() + 3)
+        else d.setMonth(d.getMonth() + 1)
+        const newPeriodEnd = d.toISOString().split('T')[0]
 
         const { error } = await serviceRoleSupabase
             .from('subscriptions')
             .update({
-                current_period_start: newPeriodStart,
                 current_period_end: newPeriodEnd,
                 status: 'active',
+                past_due_at: null,
                 updated_at: new Date(),
             })
             .eq('id', sub.id)
