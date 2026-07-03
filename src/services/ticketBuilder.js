@@ -56,7 +56,9 @@ export function buildTicketBuffer(ticketData) {
             ? `${item.name} - ${item.variationName}`
             : item.name
         printer.println(name)
-        const line = `${item.quantity}x ${formatCurrency(item.price)}`
+        const qty = Number(item.quantity) || 0
+        const unit = item.displayUnit || ''
+        const line = `${qty}${unit ? ' ' + unit : ''} x ${formatCurrency(item.price)}`
         printer.tableCustom([
             { text: line, align: 'LEFT', width: DETAIL_WIDTH },
             {

@@ -110,7 +110,8 @@ export const createSale = async (req, res) => {
 			if (variation.track_stock === false) continue
 
 			const product = products.find(p => p.id === item.product_id)
-			if (item.quantity > variation.stock) {
+			const effectiveQty = item.quantity * (item.conversion_factor || 1)
+			if (effectiveQty > variation.stock) {
 				return res.status(400).json({
 					error: `La variación ${product?.name || item.product_id} - ${variation.variation_name} no tiene stock suficiente, stock actual es ${variation.stock}`,
 				})
@@ -122,16 +123,22 @@ export const createSale = async (req, res) => {
 			const variation = variations.find(v => v.id === item.variation_id)
 			const unitPrice = variation.price
 			const unitCost = variation.unit_cost ?? 0
-			const subtotal = unitPrice * item.quantity
+			const quantity = Number(item.quantity) || 0
+			const conversionFactor = Number(item.conversion_factor) || 1
+			// Si se vende en submúltiplo, el precio unitario es base * conversion_factor
+			const effectiveUnitPrice = unitPrice * conversionFactor
+			const subtotal = effectiveUnitPrice * quantity
 			total_amount += subtotal
 
 			return {
 				...item,
-				unit_price: unitPrice,
+				quantity,
+				unit_price: effectiveUnitPrice,
 				unit_cost: unitCost,
 				subtotal,
 				variation_name: variation.variation_name,
 				track_stock: variation.track_stock,
+				conversion_factor: conversionFactor,
 			}
 		})
 
@@ -160,7 +167,15 @@ export const createSale = async (req, res) => {
 		if (salesError) throw new Error(salesError.message || JSON.stringify(salesError))
 
 		const itemsToInsert = itemsWithPrices.map((item) => ({
-			...item,
+			product_id: item.product_id,
+			variation_id: item.variation_id,
+			variation_name: item.variation_name,
+			quantity: item.quantity,
+			unit_price: item.unit_price,
+			unit_cost: item.unit_cost,
+			subtotal: item.subtotal,
+			track_stock: item.track_stock,
+			sold_in_unit_id: item.sold_in_unit_id || null,
 			sale_id: data.id,
 			created_at: localDate,
 		}))
@@ -176,7 +191,8 @@ export const createSale = async (req, res) => {
 		for (const item of itemsWithPrices) {
 			const variation = variations.find(v => v.id === item.variation_id)
 			if (!variation || variation.track_stock === false) continue
-			const newStock = (variation?.stock || 0) - item.quantity
+			const effectiveQty = item.quantity * item.conversion_factor
+			const newStock = (variation?.stock || 0) - effectiveQty
 
 			const { error: updateVarError } = await client
 				.from('product_variations')
@@ -190,7 +206,7 @@ export const createSale = async (req, res) => {
 				product_id: item.product_id,
 				variation_id: item.variation_id,
 				type: 'sale',
-				quantity: item.quantity,
+				quantity: effectiveQty,
 				unit_cost: item.unit_cost,
 				notes: `Venta #${data.ticket_number}`,
 				created_at: localDate,
@@ -391,13 +407,16 @@ export const returnSale = async (req, res) => {
 				continue
 			}
 
+			const conversionFactor = Number(returnItem.conversion_factor) || 1
+			const effectiveQty = returnItem.quantity * conversionFactor
+
 			const { data: variation } = await client
 				.from('product_variations')
 				.select('stock')
 				.eq('id', returnItem.variation_id)
 				.single()
 
-			const newStock = (variation?.stock || 0) + returnItem.quantity
+			const newStock = (variation?.stock || 0) + effectiveQty
 
 			const { error: updateVarError } = await client
 				.from('product_variations')
@@ -413,7 +432,7 @@ export const returnSale = async (req, res) => {
 				product_id: returnItem.product_id,
 				variation_id: returnItem.variation_id,
 				type: 'return',
-				quantity: returnItem.quantity,
+				quantity: effectiveQty,
 				unit_cost: returnItem.unit_cost ?? 0,
 				notes: `Devolución venta #${sale.ticket_number}`,
 				created_at: localDate,
@@ -456,6 +475,7 @@ export const returnSale = async (req, res) => {
 			quantity: item.quantity,
 			unit_price: item.unit_price,
 			subtotal: item.subtotal,
+			sold_in_unit_id: item.sold_in_unit_id || null,
 			created_at: localDate
 		}))
 

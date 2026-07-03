@@ -5,15 +5,15 @@ import { generateSku, generateBatchSkus } from '../helpers/skuGenerator.js'
 
 const getClient = (req) => req.user?.role !== 'admin' ? serviceRoleSupabase : (req.supabase || supabase)
 
-const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Tipo Variacion', 'Nombre Variacion', 'Costo Unitario', 'Precio', 'Categoria', 'Stock Inicial', 'Stock Minimo']
+const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Tipo Variacion', 'Nombre Variacion', 'Costo Unitario', 'Precio', 'Categoria', 'Stock Inicial', 'Stock Minimo', 'Unidad de Medida']
 
 export const generateTemplate = async (req, res) => {
     try {
         const sampleData = [
-            ['7701234567890', 'CAF-001', 'Café Premium 500g', '', '', 18000, 28500, 'Café', 50, 10],
-            ['', 'CAM-S', 'Camiseta Deportiva', 'Talla', 'S', 15000, 25000, 'Ropa', 50, 10],
-            ['', 'CAM-M', 'Camiseta Deportiva', 'Talla', 'M', 16000, 27000, 'Ropa', 40, 10],
-            ['', 'CAM-L', 'Camiseta Deportiva', 'Talla', 'L', 17000, 29000, 'Ropa', 30, 5],
+            ['7701234567890', 'CAF-001', 'Café Premium 500g', '', '', 18000, 28500, 'Café', 50, 10, 'Unidad'],
+            ['', 'CAM-S', 'Camiseta Deportiva', 'Talla', 'S', 15000, 25000, 'Ropa', 50, 10, 'Unidad'],
+            ['', 'CAM-M', 'Camiseta Deportiva', 'Talla', 'M', 16000, 27000, 'Ropa', 40, 10, 'Unidad'],
+            ['', 'CAM-L', 'Camiseta Deportiva', 'Talla', 'L', 17000, 29000, 'Ropa', 30, 5, 'Unidad'],
         ]
 
         const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleData])
@@ -48,6 +48,7 @@ const COLUMN_MAP = {
     'stock minimo': 'min_stock',
     'tipo variacion': 'variation_type',
     'nombre variacion': 'variation_name',
+    'unidad de medida': 'unit_of_measure',
 }
 
 const normalizeRow = (row) => {
@@ -174,6 +175,11 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
 
     if (!sku && resolvedSku) results.autoSkusCreated = (results.autoSkusCreated || 0) + 1
 
+    const unitMap = { 'Unidad': 1, 'Metro': 2, 'Centímetro': 3, 'Kilogramo': 4, 'Gramo': 5 }
+    const unitOfMeasureId = row.unit_of_measure
+        ? (Number(row.unit_of_measure) || unitMap[String(row.unit_of_measure).trim()] || 1)
+        : 1
+
     const { data: defaultVariation, error: varError } = await client
         .from('product_variations')
         .insert({
@@ -189,6 +195,7 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
             track_stock: stock > 0,
             is_active: true,
             sort_order: 0,
+            unit_of_measure_id: unitOfMeasureId,
         })
         .select()
         .single()
@@ -300,6 +307,7 @@ const createVariationProduct = async (client, businessId, group, results, catego
         results.autoSkusCreated = (results.autoSkusCreated || 0) + emptySkuVars.length
     }
 
+    const unitMap = { 'Unidad': 1, 'Metro': 2, 'Centímetro': 3, 'Kilogramo': 4, 'Gramo': 5 }
     const variationInserts = variations.map((v, i) => ({
         product_id: product.id,
         business_id: businessId,
@@ -313,6 +321,9 @@ const createVariationProduct = async (client, businessId, group, results, catego
         track_stock: true,
         sort_order: i + 1,
         is_active: true,
+        unit_of_measure_id: v.unit_of_measure
+            ? (Number(v.unit_of_measure) || unitMap[String(v.unit_of_measure).trim()] || 1)
+            : 1,
     }))
 
     const { data: createdVariations, error: varError } = await client
@@ -448,7 +459,8 @@ const PRODUCT_SELECT = `
         is_active,
         sort_order,
         min_stock,
-        track_stock
+        track_stock,
+        unit_of_measure_id
     )
 `
 
@@ -478,7 +490,7 @@ export const getProductById = async (req, res) => {
 export const createProduct = async (req, res) => {
     try {
         const client = getClient(req)
-        const { sku, business_id, barcode, variations, variation_type, initial_stock, min_stock_inicial, price, unit_cost, track_stock, ...productFields } = req.body
+        const { sku, business_id, barcode, variations, variation_type, initial_stock, min_stock_inicial, price, unit_cost, track_stock, unit_of_measure_id, ...productFields } = req.body
 
         if (sku) {
             const { data: existing } = await client
@@ -546,6 +558,7 @@ export const createProduct = async (req, res) => {
                 track_stock: v.track_stock ?? true,
                 sort_order: i + 1,
                 is_active: v.is_active !== false,
+                unit_of_measure_id: v.unit_of_measure_id || 1,
             }))
 
             const emptySkuVars = variationInserts.filter(v => !v.sku)
@@ -603,6 +616,7 @@ export const createProduct = async (req, res) => {
                     track_stock: track_stock ?? true,
                     is_active: true,
                     sort_order: 0,
+                    unit_of_measure_id: req.body.unit_of_measure_id || 1,
                 })
                 .select()
                 .single()
@@ -638,7 +652,7 @@ export const updateProduct = async (req, res) => {
     try {
         const client = getClient(req)
         const { ProductId } = req.params
-        const { sku, business_id, barcode, variations, variation_type, price, unit_cost, initial_stock, min_stock_inicial, track_stock, ...productFields } = req.body
+        const { sku, business_id, barcode, variations, variation_type, price, unit_cost, initial_stock, min_stock_inicial, track_stock, unit_of_measure_id, ...productFields } = req.body
 
         if (sku && business_id) {
             const { data: existing } = await client
@@ -711,6 +725,7 @@ export const updateProduct = async (req, res) => {
                     track_stock: v.track_stock ?? true,
                     sort_order: i + 1,
                     is_active: v.is_active !== false,
+                    unit_of_measure_id: v.unit_of_measure_id || 1,
                 }
 
                 if (v.id) {
@@ -777,6 +792,7 @@ export const updateProduct = async (req, res) => {
                 if (initial_stock !== undefined) varUpdate.stock = Number(initial_stock)
                 if (min_stock_inicial !== undefined) varUpdate.min_stock = Number(min_stock_inicial)
                 if (track_stock !== undefined) varUpdate.track_stock = track_stock
+                if (unit_of_measure_id !== undefined) varUpdate.unit_of_measure_id = unit_of_measure_id
                 varUpdate.is_active = true
 
                 await client
@@ -799,6 +815,7 @@ export const updateProduct = async (req, res) => {
                         track_stock: track_stock ?? true,
                         is_active: true,
                         sort_order: 0,
+                        unit_of_measure_id: unit_of_measure_id || 1,
                     })
 
                 if (newDefaultError) throw newDefaultError
@@ -831,6 +848,7 @@ export const updateProduct = async (req, res) => {
             if (initial_stock !== undefined) varUpdate.stock = Number(initial_stock)
             if (min_stock_inicial !== undefined) varUpdate.min_stock = Number(min_stock_inicial)
             if (track_stock !== undefined) varUpdate.track_stock = track_stock
+            if (unit_of_measure_id !== undefined) varUpdate.unit_of_measure_id = unit_of_measure_id
 
             if (Object.keys(varUpdate).length > 0) {
                 await client.from('product_variations').update(varUpdate).eq('id', defaultVar.id)
