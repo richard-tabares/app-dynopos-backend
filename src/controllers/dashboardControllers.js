@@ -33,7 +33,7 @@ export const getDashboardMetrics = async (req, res) => {
                 .eq('is_active', true),
             client
                 .from('products')
-                .select('id, name, variation_type, variations_disabled, product_variations(id, stock, min_stock, unit_cost, variation_name, is_active)')
+                .select('id, name, variation_type, variations_disabled, product_variations(id, stock, min_stock, unit_cost, variation_name, is_active, unit_of_measure_id)')
                 .eq('business_id', businessId)
                 .eq('is_active', true),
             client
@@ -122,7 +122,8 @@ export const getDashboardMetrics = async (req, res) => {
                         variationName: pv.variation_name,
                         variationType: p.variation_type,
                         stock: pv.stock,
-                        min_stock: pv.min_stock
+                        min_stock: pv.min_stock,
+                        unit_of_measure_id: pv.unit_of_measure_id
                     }))
             })
             .sort((a, b) => a.stock - b.stock)

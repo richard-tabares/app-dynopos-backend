@@ -65,7 +65,7 @@ export const getReports = async (req, res) => {
             if (saleIds.length > 0) {
                 const { data: items, error: itemsError } = await client
                     .from('salesItems')
-                    .select('sale_id, unit_cost, quantity, subtotal, created_at')
+                    .select('sale_id, unit_cost, quantity, subtotal, created_at, product_variations(unit_of_measure_id)')
                     .in('sale_id', saleIds)
 
                 if (itemsError) throw itemsError
@@ -111,7 +111,7 @@ export const getReports = async (req, res) => {
 
             const { data: salesItemsData, error: itemsErr } = await client
                 .from('salesItems')
-                .select('product_id, variation_id, variation_name, unit_cost, quantity, subtotal, products(name, variation_type)')
+                .select('product_id, variation_id, variation_name, unit_cost, quantity, subtotal, products(name, variation_type), product_variations(unit_of_measure_id)')
                 .in('sale_id', saleIds)
 
             if (itemsErr) throw itemsErr
@@ -126,6 +126,7 @@ export const getReports = async (req, res) => {
                         variation_id: item.variation_id,
                         variation_name: item.variation_name,
                         variation_type: item.products?.variation_type,
+                        unit_of_measure_id: item.product_variations?.unit_of_measure_id,
                         totalQuantity: 0,
                         totalRevenue: 0,
                         totalCost: 0
@@ -143,6 +144,7 @@ export const getReports = async (req, res) => {
                     variation_id: p.variation_id,
                     variation_name: p.variation_name,
                     variation_type: p.variation_type,
+                    unit_of_measure_id: p.unit_of_measure_id,
                     totalQuantity: p.totalQuantity,
                     totalRevenue: p.totalRevenue,
                     totalCost: p.totalCost,
@@ -177,7 +179,7 @@ export const getReports = async (req, res) => {
 
             let query = client
                 .from('inventory_movements')
-                .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode)')
+                .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
                 .eq('business_id', businessId)
 
             if (type) query = query.eq('type', type)
@@ -347,38 +349,89 @@ export const getReports = async (req, res) => {
         }
 
         if (section === 'inventory') {
-            const queries = []
+            const { data: productsData, error: productsError } = await client
+                .from('products')
+                .select(`
+                    id, name, variation_type, variations_disabled,
+                    categories (id, name),
+                    product_variations (
+                        id, variation_name, sku, barcode,
+                        unit_cost, stock, min_stock, track_stock,
+                        unit_of_measure_id
+                    )
+                `)
+                .eq('business_id', businessId)
 
-            queries.push(
-                client
-                    .from('vw_stock_status')
-                    .select('*')
-                    .eq('business_id', businessId)
-                    .order('stock_status', { ascending: true })
-                    .order('current_stock', { ascending: true })
-            )
+            if (productsError) throw productsError
 
-            queries.push(
-                client
-                    .from('vw_inventory_valuation')
-                    .select('*')
-                    .eq('business_id', businessId)
-                    .order('total_value', { ascending: false })
-            )
+            const stockStatus = []
+            const inventoryValuation = []
 
-            const [
-                { data: stockData, error: stockError },
-                { data: valuationData, error: valuationError }
-            ] = await Promise.all(queries)
+            for (const p of productsData || []) {
+                for (const pv of p.product_variations || []) {
+                    const stock = pv.stock || 0
+                    const minStock = pv.min_stock || 0
+                    const unitCost = pv.unit_cost || 0
 
-            if (stockError) throw stockError
-            if (valuationError) throw valuationError
+                    let stock_status = 'ok'
+                    if (pv.track_stock !== true) {
+                        stock_status = 'sin_control'
+                    } else if (stock <= 0) {
+                        stock_status = 'sin_stock'
+                    } else if (stock < minStock) {
+                        stock_status = 'bajo'
+                    }
+
+                    stockStatus.push({
+                        product_id: p.id,
+                        product_name: p.name,
+                        variation_type: p.variation_type,
+                        track_stock: pv.track_stock,
+                        variation_id: pv.id,
+                        variation_name: pv.variation_name,
+                        sku: pv.sku,
+                        barcode: pv.barcode,
+                        unit_cost: unitCost,
+                        category_id: p.categories?.id,
+                        category_name: p.categories?.name,
+                        current_stock: stock,
+                        min_stock: minStock,
+                        stock_status,
+                        unit_of_measure_id: pv.unit_of_measure_id
+                    })
+
+                    inventoryValuation.push({
+                        business_id: businessId,
+                        product_id: p.id,
+                        product_name: p.name,
+                        variation_type: p.variation_type,
+                        sku: pv.sku,
+                        barcode: pv.barcode,
+                        current_stock: stock,
+                        unit_cost: unitCost,
+                        total_value: Math.round(stock * unitCost),
+                        variation_id: pv.id,
+                        variation_name: pv.variation_name,
+                        unit_of_measure_id: pv.unit_of_measure_id
+                    })
+                }
+            }
+
+            stockStatus.sort((a, b) => {
+                const order = { sin_control: 0, sin_stock: 1, bajo: 2, ok: 3 }
+                const oa = order[a.stock_status] ?? 0
+                const ob = order[b.stock_status] ?? 0
+                if (oa !== ob) return oa - ob
+                return a.current_stock - b.current_stock
+            })
+
+            inventoryValuation.sort((a, b) => b.total_value - a.total_value)
 
             return res.json({
                 section: 'inventory',
                 data: {
-                    stockStatus: stockData || [],
-                    inventoryValuation: valuationData || []
+                    stockStatus: stockStatus || [],
+                    inventoryValuation: inventoryValuation || []
                 }
             })
         }
@@ -486,7 +539,7 @@ export const getReports = async (req, res) => {
             if (returnData) {
                 const { data: itemsData, error: itemsError } = await client
                     .from('returns_items')
-                    .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode)')
+                    .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
                     .eq('return_id', returnData.id)
                 if (itemsError) throw itemsError
                 items = itemsData || []

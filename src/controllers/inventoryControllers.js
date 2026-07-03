@@ -30,7 +30,8 @@ const PRODUCT_SELECT = `
         is_active,
         sort_order,
         min_stock,
-        track_stock
+        track_stock,
+        unit_of_measure_id
     )
 `
 
