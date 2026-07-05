@@ -4,10 +4,10 @@ import { sendEmail, buildRenewalSuccessEmail, buildRenewalFailedEmail } from './
 
 const GRACE_PERIOD_DAYS = 7
 
-const calculateAmount = (monthlyPrice, billingFrequency) => {
-  if (billingFrequency === 'annual') return Math.round(monthlyPrice * 12 * 0.9)
-  if (billingFrequency === 'quarterly') return monthlyPrice * 3
-  return monthlyPrice
+const calculateAmount = (plan, billingFrequency) => {
+  if (billingFrequency === 'annual') return plan.annual_price
+  if (billingFrequency === 'quarterly') return plan.quarterly_price
+  return plan.monthly_price
 }
 
 const addPeriod = (date, frequency) => {
@@ -34,13 +34,13 @@ export const renewSubscription = async (subscription) => {
 
   const { data: plan } = await serviceRoleSupabase
     .from('subscription_plans')
-    .select('monthly_price')
+    .select('monthly_price, quarterly_price, annual_price')
     .eq('id', subscription.plan_id)
     .single()
 
   if (!plan) return { status: 'skipped' }
 
-  const amount = calculateAmount(plan.monthly_price, subscription.billing_frequency)
+  const amount = calculateAmount(plan, subscription.billing_frequency)
   const amountInCents = Math.round(amount * 100)
   const reference = wompiService.generateReference()
 
@@ -221,11 +221,11 @@ export const renewAllExpired = async () => {
     } else {
       const { data: plan } = await serviceRoleSupabase
         .from('subscription_plans')
-        .select('monthly_price')
+        .select('monthly_price, quarterly_price, annual_price')
         .eq('id', sub.plan_id)
         .single()
 
-      const amount = plan ? calculateAmount(plan.monthly_price, sub.billing_frequency) : 0
+      const amount = plan ? calculateAmount(plan, sub.billing_frequency) : 0
       const reference = wompiService.generateReference()
 
       await sendEmail(buildRenewalFailedEmail({

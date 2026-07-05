@@ -123,8 +123,7 @@ export const updateUser = async (req, res) => {
             return res.status(403).json({ error: 'No puedes asignar el rol administrador a otro usuario' })
         }
 
-        const client = getClient(req)
-        const { data: existing } = await client
+        const { data: existing } = await serviceRoleSupabase
             .from('profiles')
             .select('id')
             .eq('id', userId)
@@ -140,7 +139,7 @@ export const updateUser = async (req, res) => {
         if (role !== undefined) updates.role = role
         if (permissions !== undefined) updates.permissions = permissions
 
-        const { error } = await client
+        const { error } = await serviceRoleSupabase
             .from('profiles')
             .update(updates)
             .eq('id', userId)
@@ -166,8 +165,7 @@ export const deleteUser = async (req, res) => {
             return res.status(403).json({ error: 'No puedes eliminar tu propio usuario' })
         }
 
-        const client = getClient(req)
-        const { data: existing } = await client
+        const { data: existing } = await serviceRoleSupabase
             .from('profiles')
             .select('id')
             .eq('id', userId)

@@ -59,6 +59,8 @@ export const initSignup = async (req, res) => {
         name: plan.name,
         description: plan.description,
         monthly_price: plan.monthly_price,
+        quarterly_price: plan.quarterly_price,
+        annual_price: plan.annual_price,
         features: plan.features,
       },
     })
@@ -96,12 +98,12 @@ export const createCheckout = async (req, res) => {
 
     const { data: planData } = await serviceRoleSupabase
       .from('subscription_plans')
-      .select('monthly_price')
+      .select('monthly_price, quarterly_price, annual_price')
       .eq('status', 'active')
       .limit(1)
       .single()
 
-    const amount = calculateAmount(planData.monthly_price, billing_frequency)
+    const amount = calculateAmount(planData, billing_frequency)
     const amountInCents = Math.round(amount * 100)
 
     const reference = wompiService.generateReference()
@@ -371,12 +373,12 @@ export const processCardPayment = async (req, res) => {
 
     const { data: planData } = await serviceRoleSupabase
       .from('subscription_plans')
-      .select('monthly_price')
+      .select('monthly_price, quarterly_price, annual_price')
       .eq('status', 'active')
       .limit(1)
       .single()
 
-    const amount = calculateAmount(planData.monthly_price, billing_frequency)
+    const amount = calculateAmount(planData, billing_frequency)
     const amountInCents = Math.round(amount * 100)
 
     const reference = wompiService.generateReference()
@@ -475,10 +477,10 @@ export const processCardPayment = async (req, res) => {
   }
 }
 
-const calculateAmount = (monthlyPrice, billingFrequency) => {
-  if (billingFrequency === 'annual') return Math.round(monthlyPrice * 12 * 0.9)
-  if (billingFrequency === 'quarterly') return monthlyPrice * 3
-  return monthlyPrice
+const calculateAmount = (plan, billingFrequency) => {
+  if (billingFrequency === 'annual') return plan.annual_price
+  if (billingFrequency === 'quarterly') return plan.quarterly_price
+  return plan.monthly_price
 }
 
 const addPeriod = (date, frequency) => {

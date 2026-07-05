@@ -1,4 +1,37 @@
+import crypto from 'crypto'
 import { supabase, serviceRoleSupabase } from '../config/supabase.js'
+
+const calculateAmount = (plan, billingFrequency) => {
+  if (billingFrequency === 'annual') return plan.annual_price
+  if (billingFrequency === 'quarterly') return plan.quarterly_price
+  return plan.monthly_price
+}
+
+async function createApprovedTransaction(businessId, billingFrequency, paymentMethod) {
+  try {
+    const { data: plan } = await serviceRoleSupabase
+      .from('subscription_plans')
+      .select('monthly_price, quarterly_price, annual_price')
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle()
+    if (!plan) return
+
+    const amount = calculateAmount(plan, billingFrequency)
+    const reference = `DYNOPOS-ADMIN-${crypto.randomUUID()}`
+
+    await serviceRoleSupabase.from('payment_transactions').insert({
+      reference,
+      business_id: businessId,
+      amount,
+      payment_method: paymentMethod || 'transfer',
+      status: 'approved',
+      billing_frequency: billingFrequency,
+    })
+  } catch (err) {
+    console.error('Error creating approved transaction:', err)
+  }
+}
 
 export const adminLogin = async (req, res) => {
     const { email, password } = req.body
@@ -155,6 +188,8 @@ export const createClient = async (req, res) => {
             payment_method: payment_method === 'card' ? 'card' : 'transfer',
         }) } catch (_) {}
 
+        await createApprovedTransaction(userId, freq, payment_method === 'card' ? 'card' : 'transfer')
+
         res.status(201).json({
             status: 201,
             message: 'Cliente creado exitosamente',
@@ -293,6 +328,8 @@ export const manualRenewal = async (req, res) => {
             })
             .eq('id', sub.id)
         if (error) throw error
+
+        await createApprovedTransaction(sub.business_id, freq, 'transfer')
 
         res.json({ status: 200, message: 'Suscripción renovada manualmente' })
     } catch (error) {
