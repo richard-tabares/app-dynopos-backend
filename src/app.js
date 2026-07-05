@@ -17,6 +17,7 @@ import supportRoutes from './routes/supportRoutes.js'
 import usersRoutes from './routes/usersRoutes.js'
 import profilesRoutes from './routes/profilesRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
+import changelogRoutes from './routes/changelogRoutes.js'
 import printRoutes from './routes/printRoutes.js'
 
 const app = express()
@@ -53,6 +54,7 @@ app.use('/api/support', supportRoutes)
 app.use('/api/users', usersRoutes)
 app.use('/api/profiles', profilesRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/changelog', changelogRoutes)
 app.use('/api/print', printRoutes)
 
 // Global error handler

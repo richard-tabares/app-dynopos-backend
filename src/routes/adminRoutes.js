@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../middleware/authenticate.js'
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin.js'
 import * as adminCtrl from '../controllers/adminControllers.js'
+import * as changelogCtrl from '../controllers/changelogControllers.js'
 
 const router = Router()
 
@@ -24,5 +25,11 @@ router.get('/payments', adminCtrl.getPayments)
 
 router.post('/clients/:id/clear-data', adminCtrl.clearClientData)
 router.delete('/clients/:id', adminCtrl.deleteClientAccount)
+
+router.get('/changelog', (req, res, next) => { req.isAdminRoute = true; next() }, changelogCtrl.getChangelog)
+router.get('/changelog/:id', (req, res, next) => { req.isAdminRoute = true; next() }, changelogCtrl.getChangelogById)
+router.post('/changelog', changelogCtrl.createChangelog)
+router.patch('/changelog/:id', changelogCtrl.updateChangelog)
+router.delete('/changelog/:id', changelogCtrl.deleteChangelog)
 
 export default router
