@@ -68,7 +68,7 @@ export const getChangelogById = async (req, res) => {
 export const createChangelog = async (req, res) => {
     try {
         const client = serviceRoleSupabase
-        const { type, title, description, bullets, media_url } = req.body
+        const { type, title, description, bullets } = req.body
 
         if (!type || !title) {
             return res.status(400).json({ error: 'El tipo y el título son obligatorios' })
@@ -76,7 +76,7 @@ export const createChangelog = async (req, res) => {
 
         const { data, error } = await client
             .from('changelog')
-            .insert({ type, title, description, bullets: bullets || [], media_url: media_url || null })
+            .insert({ type, title, description, bullets: bullets || [] })
             .select()
             .single()
 
@@ -91,14 +91,13 @@ export const updateChangelog = async (req, res) => {
     try {
         const client = serviceRoleSupabase
         const { id } = req.params
-        const { type, title, description, bullets, media_url, is_active } = req.body
+        const { type, title, description, bullets, is_active } = req.body
 
         const updateData = {}
         if (type !== undefined) updateData.type = type
         if (title !== undefined) updateData.title = title
         if (description !== undefined) updateData.description = description
         if (bullets !== undefined) updateData.bullets = bullets
-        if (media_url !== undefined) updateData.media_url = media_url
         if (is_active !== undefined) updateData.is_active = is_active
 
         const { data, error } = await client
@@ -126,6 +125,43 @@ export const deleteChangelog = async (req, res) => {
 
         if (error) return res.status(400).json({ error: error.message })
         return res.json({ message: 'Novedad eliminada correctamente' })
+    } catch (err) {
+        return res.status(500).json({ error: err.message })
+    }
+}
+
+export const uploadChangelogImage = async (req, res) => {
+    try {
+        const file = req.file
+        if (!file) return res.status(400).json({ error: 'No se subió ningún archivo' })
+
+        const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+        if (!allowed.includes(file.mimetype)) {
+            return res.status(400).json({ error: 'Formato no permitido. Usa JPG, PNG, WebP o GIF' })
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            return res.status(400).json({ error: 'La imagen no debe superar los 5MB' })
+        }
+
+        const ext = file.originalname.split('.').pop()
+        const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50)
+        const fileName = `changelog/${Date.now()}-${sanitizedName}.${ext}`
+
+        const { error: uploadError } = await serviceRoleSupabase.storage
+            .from('changelog')
+            .upload(fileName, file.buffer, {
+                contentType: file.mimetype,
+                upsert: false,
+            })
+
+        if (uploadError) return res.status(400).json({ error: uploadError.message })
+
+        const { data: { publicUrl } } = serviceRoleSupabase.storage
+            .from('changelog')
+            .getPublicUrl(fileName)
+
+        return res.json({ url: publicUrl })
     } catch (err) {
         return res.status(500).json({ error: err.message })
     }

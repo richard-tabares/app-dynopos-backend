@@ -1,9 +1,11 @@
 import { Router } from 'express'
+import multer from 'multer'
 import { authenticate } from '../middleware/authenticate.js'
 import { requireSuperAdmin } from '../middleware/requireSuperAdmin.js'
 import * as adminCtrl from '../controllers/adminControllers.js'
 import * as changelogCtrl from '../controllers/changelogControllers.js'
 
+const upload = multer({ storage: multer.memoryStorage() })
 const router = Router()
 
 router.post('/login', adminCtrl.adminLogin)
@@ -31,5 +33,6 @@ router.get('/changelog/:id', (req, res, next) => { req.isAdminRoute = true; next
 router.post('/changelog', changelogCtrl.createChangelog)
 router.patch('/changelog/:id', changelogCtrl.updateChangelog)
 router.delete('/changelog/:id', changelogCtrl.deleteChangelog)
+router.post('/changelog/upload-image', upload.single('image'), changelogCtrl.uploadChangelogImage)
 
 export default router
