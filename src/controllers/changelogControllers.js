@@ -172,7 +172,7 @@ export const deleteChangelogImage = async (req, res) => {
         const { url } = req.body
         if (!url) return res.status(400).json({ error: 'URL requerida' })
 
-        const match = url.match(/\/public\/(.+)$/)
+        const match = url.match(/\/public\/changelog\/(.+)$/)
         if (!match) return res.status(400).json({ error: 'URL inválida' })
 
         const filePath = match[1]
