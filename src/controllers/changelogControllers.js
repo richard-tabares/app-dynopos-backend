@@ -166,3 +166,23 @@ export const uploadChangelogImage = async (req, res) => {
         return res.status(500).json({ error: err.message })
     }
 }
+
+export const deleteChangelogImage = async (req, res) => {
+    try {
+        const { url } = req.body
+        if (!url) return res.status(400).json({ error: 'URL requerida' })
+
+        const match = url.match(/\/public\/(.+)$/)
+        if (!match) return res.status(400).json({ error: 'URL inválida' })
+
+        const filePath = match[1]
+        const { error } = await serviceRoleSupabase.storage
+            .from('changelog')
+            .remove([filePath])
+
+        if (error) return res.status(400).json({ error: error.message })
+        return res.json({ message: 'Imagen eliminada correctamente' })
+    } catch (err) {
+        return res.status(500).json({ error: err.message })
+    }
+}

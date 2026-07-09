@@ -34,5 +34,6 @@ router.post('/changelog', changelogCtrl.createChangelog)
 router.patch('/changelog/:id', changelogCtrl.updateChangelog)
 router.delete('/changelog/:id', changelogCtrl.deleteChangelog)
 router.post('/changelog/upload-image', upload.single('image'), changelogCtrl.uploadChangelogImage)
+router.post('/changelog/delete-image', changelogCtrl.deleteChangelogImage)
 
 export default router
