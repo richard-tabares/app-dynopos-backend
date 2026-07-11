@@ -499,6 +499,10 @@ export const bulkCreateProducts = async (req, res) => {
         const seenBarcodes = new Set()
         const results = { created: 0, errors: [], total: rows.length, autoSkusCreated: 0 }
         const variationGroups = {}
+        let processedCount = 0
+
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+        res.write(JSON.stringify({ type: 'total', total: rows.length }) + '\n')
 
         for (let i = 0; i < rows.length; i++) {
             const row = normalizeRow(rows[i])
@@ -511,10 +515,14 @@ export const bulkCreateProducts = async (req, res) => {
                 const name = String(row.name || '').trim()
                 if (!name) {
                     results.errors.push({ row: rowNum, error: 'El nombre del producto es obligatorio para variaciones' })
+                    processedCount++
+                    res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
                     continue
                 }
                 if (!row.price || Number(row.price) <= 0) {
                     results.errors.push({ row: rowNum, error: 'El precio de la variación debe ser mayor a 0' })
+                    processedCount++
+                    res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
                     continue
                 }
 
@@ -525,17 +533,27 @@ export const bulkCreateProducts = async (req, res) => {
                 variationGroups[key].variations.push({ ...row, variation_name: variationName })
             } else {
                 await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap)
+                processedCount++
+                res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
             }
         }
 
         for (const [, group] of Object.entries(variationGroups)) {
             await createVariationProduct(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes)
+            processedCount += group.variations.length
+            res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
         }
 
-        res.json(results)
+        res.write(JSON.stringify({ type: 'complete', results }) + '\n')
+        res.end()
     } catch (error) {
         console.error('Bulk upload error:', error)
-        res.status(500).json({ error: error.message })
+        if (res.headersSent) {
+            res.write(JSON.stringify({ type: 'error', error: error.message }) + '\n')
+            res.end()
+        } else {
+            res.status(500).json({ error: error.message })
+        }
     }
 }
 
