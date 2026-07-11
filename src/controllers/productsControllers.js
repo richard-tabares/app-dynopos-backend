@@ -10,7 +10,7 @@ const TEMPLATE_HEADERS = ['Codigo de Barras', 'SKU', 'Nombre', 'Tipo Variacion',
 export const generateTemplate = async (req, res) => {
     try {
         const sampleData = [
-            ['7701234567890', 'CAF-001', 'Café Premium 500g', '', '', 18000, 28500, 'Café', 50, 10, 'Unidad'],
+            ['7701234567890', 'CAF-001', 'Café Premium 500g', '', '', 18000, 28500, 'Café', 50, 10, 'Kilogramo'],
             ['', 'CAM-S', 'Camiseta Deportiva', 'Talla', 'S', 15000, 25000, 'Ropa', 50, 10, 'Unidad'],
             ['', 'CAM-M', 'Camiseta Deportiva', 'Talla', 'M', 16000, 27000, 'Ropa', 40, 10, 'Unidad'],
             ['', 'CAM-L', 'Camiseta Deportiva', 'Talla', 'L', 17000, 29000, 'Ropa', 30, 5, 'Unidad'],
@@ -60,7 +60,7 @@ const normalizeRow = (row) => {
     return normalized
 }
 
-const createSimpleProduct = async (client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum) => {
+const createSimpleProduct = async (client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap) => {
     const name = String(row.name || '').trim()
     const price = Number(row.price)
 
@@ -108,7 +108,8 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
     }
 
     if (barcode) {
-        const barcodeLower = barcode.toLowerCase()
+        const barcodeParsed = parseBarcode(barcode) || barcode
+        const barcodeLower = barcodeParsed.toLowerCase()
         if (seenBarcodes.has(barcodeLower)) {
             results.errors.push({ row: rowNum, error: `Código de barras duplicado en el mismo archivo: "${barcode}"` })
             return
@@ -118,7 +119,7 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
         const { data: existing } = await client
             .from('product_variations')
             .select('id, product_id')
-            .eq('barcode', barcode)
+            .eq('barcode', barcodeParsed)
             .maybeSingle()
 
         if (existing) {
@@ -132,6 +133,18 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
                 return
             }
         }
+    }
+
+    const { data: existingProduct } = await client
+        .from('products')
+        .select('id')
+        .eq('name', name)
+        .eq('business_id', businessId)
+        .maybeSingle()
+
+    if (existingProduct) {
+        results.errors.push({ row: rowNum, error: `Ya existe un producto llamado "${name}"` })
+        return
     }
 
     let categoryId = null
@@ -175,10 +188,15 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
 
     if (!sku && resolvedSku) results.autoSkusCreated = (results.autoSkusCreated || 0) + 1
 
-    const unitMap = { 'Unidad': 1, 'Metro': 2, 'Centímetro': 3, 'Kilogramo': 4, 'Gramo': 5 }
-    const unitOfMeasureId = row.unit_of_measure
-        ? (Number(row.unit_of_measure) || unitMap[String(row.unit_of_measure).trim()] || 1)
-        : 1
+    let unitOfMeasureId = 1
+    if (row.unit_of_measure && String(row.unit_of_measure).trim() !== '') {
+        const str = String(row.unit_of_measure).trim()
+        unitOfMeasureId = baseUnitMap[str] !== undefined ? Number(str) : baseUnitMap[str.toLowerCase()]
+        if (unitOfMeasureId === undefined) {
+            results.errors.push({ row: rowNum, error: `"${str}" no es una unidad base válida. Use: Unidad, Metro o Kilogramo` })
+            return
+        }
+    }
 
     const { data: defaultVariation, error: varError } = await client
         .from('product_variations')
@@ -230,7 +248,7 @@ const createSimpleProduct = async (client, businessId, row, results, categoryMap
     results.created++
 }
 
-const createVariationProduct = async (client, businessId, group, results, categoryMap) => {
+const createVariationProduct = async (client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes) => {
     const { name: productName, variationType, variations } = group
 
     const { data: existing } = await client
@@ -262,6 +280,37 @@ const createVariationProduct = async (client, businessId, group, results, catego
             if (!catError) {
                 categoryId = newCat.id
                 categoryMap[lowerName] = newCat.id
+            }
+        }
+    }
+
+    for (let i = 0; i < variations.length; i++) {
+        const v = variations[i]
+        if (!v.sku) continue
+        const rawSku = String(v.sku).trim()
+        const skuLower = rawSku.toLowerCase()
+
+        if (seenSkus.has(skuLower)) {
+            results.errors.push({ error: `Producto "${productName}": SKU duplicado en el archivo "${rawSku}" (variación ${v.variation_name || i + 1})` })
+            return
+        }
+        seenSkus.add(skuLower)
+
+        const { data: existing } = await client
+            .from('product_variations')
+            .select('id, product_id')
+            .eq('sku', rawSku)
+            .maybeSingle()
+
+        if (existing) {
+            const { data: prod } = await client
+                .from('products')
+                .select('business_id')
+                .eq('id', existing.product_id)
+                .single()
+            if (prod && prod.business_id === businessId) {
+                results.errors.push({ error: `Producto "${productName}": ya existe una variante con el SKU "${rawSku}"` })
+                return
             }
         }
     }
@@ -307,7 +356,50 @@ const createVariationProduct = async (client, businessId, group, results, catego
         results.autoSkusCreated = (results.autoSkusCreated || 0) + emptySkuVars.length
     }
 
-    const unitMap = { 'Unidad': 1, 'Metro': 2, 'Centímetro': 3, 'Kilogramo': 4, 'Gramo': 5 }
+    for (let i = 0; i < variations.length; i++) {
+        const v = variations[i]
+        if (v.unit_of_measure && String(v.unit_of_measure).trim() !== '') {
+            const str = String(v.unit_of_measure).trim()
+            const valid = baseUnitMap[str] !== undefined ? Number(str) : baseUnitMap[str.toLowerCase()]
+            if (valid === undefined) {
+                results.errors.push({ error: `Producto "${productName}": "${str}" no es una unidad base válida (variación ${v.variation_name || i + 1}). Use: Unidad, Metro o Kilogramo` })
+                return
+            }
+        }
+    }
+
+    for (let i = 0; i < variations.length; i++) {
+        const v = variations[i]
+        if (!v.barcode) continue
+        const rawBarcode = String(v.barcode).trim()
+        const barcodeParsed = parseBarcode(rawBarcode) || rawBarcode
+        const barcodeLower = barcodeParsed.toLowerCase()
+
+        if (seenBarcodes.has(barcodeLower)) {
+            results.errors.push({ error: `Producto "${productName}": código de barras duplicado en el archivo "${barcodeParsed}" (variación ${v.variation_name || i + 1})` })
+            return
+        }
+        seenBarcodes.add(barcodeLower)
+
+        const { data: existing } = await client
+            .from('product_variations')
+            .select('id, product_id')
+            .eq('barcode', barcodeParsed)
+            .maybeSingle()
+
+        if (existing) {
+            const { data: prod } = await client
+                .from('products')
+                .select('business_id')
+                .eq('id', existing.product_id)
+                .single()
+            if (prod && prod.business_id === businessId) {
+                results.errors.push({ error: `Producto "${productName}": ya existe una variante con el código de barras "${barcodeParsed}"` })
+                return
+            }
+        }
+    }
+
     const variationInserts = variations.map((v, i) => ({
         product_id: product.id,
         business_id: businessId,
@@ -322,7 +414,7 @@ const createVariationProduct = async (client, businessId, group, results, catego
         sort_order: i + 1,
         is_active: true,
         unit_of_measure_id: v.unit_of_measure
-            ? (Number(v.unit_of_measure) || unitMap[String(v.unit_of_measure).trim()] || 1)
+            ? (baseUnitMap[String(v.unit_of_measure).trim()] || baseUnitMap[String(v.unit_of_measure).trim().toLowerCase()] || 1)
             : 1,
     }))
 
@@ -392,6 +484,17 @@ export const bulkCreateProducts = async (req, res) => {
             categoryMap[cat.name.toLowerCase()] = cat.id
         }
 
+        const { data: units } = await client
+            .from('units_of_measure')
+            .select('id, name')
+            .is('base_unit_id', null)
+
+        const baseUnitMap = {}
+        for (const u of units || []) {
+            baseUnitMap[u.name.toLowerCase()] = u.id
+            baseUnitMap[String(u.id)] = u.id
+        }
+
         const seenSkus = new Set()
         const seenBarcodes = new Set()
         const results = { created: 0, errors: [], total: rows.length, autoSkusCreated: 0 }
@@ -421,12 +524,12 @@ export const bulkCreateProducts = async (req, res) => {
                 }
                 variationGroups[key].variations.push({ ...row, variation_name: variationName })
             } else {
-                await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum)
+                await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap)
             }
         }
 
         for (const [, group] of Object.entries(variationGroups)) {
-            await createVariationProduct(client, businessId, group, results, categoryMap)
+            await createVariationProduct(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes)
         }
 
         res.json(results)
