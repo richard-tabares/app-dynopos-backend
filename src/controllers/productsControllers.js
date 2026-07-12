@@ -66,6 +66,7 @@ export const exportProducts = async (req, res) => {
             const catName = product.categories?.name || ''
 
             for (const v of variations) {
+                if (product.variation_type && v.variation_name === 'Default') continue
                 const unitName = unitMap[v.unit_of_measure_id] || 'Unidad'
                 rows.push([
                     v.barcode || '',
@@ -533,7 +534,7 @@ const findVariationBySkuOrBarcode = async (client, businessId, sku, barcode, see
     if (sku) {
         const { data } = await client
             .from('product_variations')
-            .select('*, product:product_id!inner(business_id, name, category_id, is_active)')
+            .select('*, product:product_id!inner(id, business_id, name, category_id, is_active)')
             .eq('product.business_id', businessId)
             .eq('sku', sku)
             .maybeSingle()
@@ -547,7 +548,7 @@ const findVariationBySkuOrBarcode = async (client, businessId, sku, barcode, see
     if (parsedBarcode) {
         const { data } = await client
             .from('product_variations')
-            .select('*, product:product_id!inner(business_id, name, category_id, is_active)')
+            .select('*, product:product_id!inner(id, business_id, name, category_id, is_active)')
             .eq('product.business_id', businessId)
             .eq('barcode', parsedBarcode)
             .maybeSingle()
