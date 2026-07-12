@@ -58,9 +58,41 @@ export const getReports = async (req, res) => {
             if (start) filteredSales = filteredSales.filter(s => s.created_at >= start)
             if (end) filteredSales = filteredSales.filter(s => s.created_at <= end)
 
-            const saleIds = filteredSales.map(s => s.id)
-            let costByDate = {}
-            let revenueByDate = {}
+    const saleIds = filteredSales.map(s => s.id)
+
+    // Fetch returns data for profitability adjustment
+    const returnsBySaleMap = {}
+    let returnedItemsFlat = []
+
+    if (saleIds.length > 0) {
+        const { data: returnsData } = await client
+            .from('returns')
+            .select('id, sale_id')
+            .in('sale_id', saleIds)
+
+        if (returnsData && returnsData.length > 0) {
+            const returnIds = returnsData.map(r => r.id)
+            const { data: returnedItems } = await client
+                .from('returns_items')
+                .select('return_id, product_id, variation_id, quantity, subtotal, unit_cost')
+                .in('return_id', returnIds)
+
+            if (returnedItems) {
+                returnedItemsFlat = returnedItems
+                const saleOfReturn = {}
+                returnsData.forEach(r => { saleOfReturn[r.id] = r.sale_id })
+
+                for (const item of returnedItems) {
+                    const sid = saleOfReturn[item.return_id]
+                    if (!returnsBySaleMap[sid]) returnsBySaleMap[sid] = []
+                    returnsBySaleMap[sid].push(item)
+                }
+            }
+        }
+    }
+
+    let costByDate = {}
+    let revenueByDate = {}
 
             if (saleIds.length > 0) {
                 const { data: items, error: itemsError } = await client
@@ -79,10 +111,24 @@ export const getReports = async (req, res) => {
 
                     costByDate[date] += (item.unit_cost || 0) * item.quantity
                     revenueByDate[date] += item.subtotal
-                }
-            }
+        }
+    }
 
-            const dailyProfit = Object.keys(costByDate).map(date => ({
+    // Subtract returns from date-based aggregates
+    for (const [saleId, items] of Object.entries(returnsBySaleMap)) {
+        const sale = filteredSales.find(s => s.id === saleId)
+        if (!sale) continue
+        const date = sale.created_at
+
+        for (const item of items) {
+            if (!costByDate[date]) costByDate[date] = 0
+            if (!revenueByDate[date]) revenueByDate[date] = 0
+            costByDate[date] -= (item.unit_cost || 0) * item.quantity
+            revenueByDate[date] -= item.subtotal
+        }
+    }
+
+    const dailyProfit = Object.keys(costByDate).map(date => ({
                 date,
                 revenue: revenueByDate[date] || 0,
                 cost: costByDate[date] || 0,
@@ -135,6 +181,16 @@ export const getReports = async (req, res) => {
                 productAgg[key].totalQuantity += item.quantity
                 productAgg[key].totalRevenue += item.subtotal
                 productAgg[key].totalCost += (item.unit_cost || 0) * item.quantity
+            }
+
+            // Subtract returns from product margins
+            for (const item of returnedItemsFlat) {
+                const key = item.variation_id || item.product_id
+                if (productAgg[key]) {
+                    productAgg[key].totalQuantity -= item.quantity
+                    productAgg[key].totalRevenue -= item.subtotal
+                    productAgg[key].totalCost -= (item.unit_cost || 0) * item.quantity
+                }
             }
 
             const productMargins = Object.entries(productAgg)

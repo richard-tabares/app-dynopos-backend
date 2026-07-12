@@ -32,6 +32,74 @@ export const generateTemplate = async (req, res) => {
     }
 }
 
+export const exportProducts = async (req, res) => {
+    try {
+        const client = getClient(req)
+        const { businessId } = req.params
+
+        const { data: products, error } = await client
+            .from('products')
+            .select(`
+                id, name, is_active, variation_type, variations_disabled,
+                categories (name),
+                product_variations (
+                    id, variation_name, price, unit_cost, sku, barcode,
+                    stock, min_stock, is_active, unit_of_measure_id
+                )
+            `)
+            .eq('business_id', businessId)
+
+        if (error) throw error
+
+        const { data: units } = await client
+            .from('units_of_measure')
+            .select('id, name')
+
+        const unitMap = {}
+        for (const u of units || []) {
+            unitMap[u.id] = u.name
+        }
+
+        const rows = []
+        for (const product of products || []) {
+            const variations = product.product_variations || []
+            const catName = product.categories?.name || ''
+
+            for (const v of variations) {
+                const unitName = unitMap[v.unit_of_measure_id] || 'Unidad'
+                rows.push([
+                    v.barcode || '',
+                    v.sku || '',
+                    product.name,
+                    product.variation_type || '',
+                    v.variation_name,
+                    v.unit_cost || 0,
+                    v.price || 0,
+                    catName,
+                    v.stock || 0,
+                    v.min_stock || 0,
+                    unitName,
+                ])
+            }
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...rows])
+        ws['!cols'] = TEMPLATE_HEADERS.map(() => ({ wch: 22 }))
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Productos')
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+        const dateStr = new Date().toISOString().slice(0, 10)
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        res.setHeader('Content-Disposition', `attachment; filename="productos-dynopos-${dateStr}.xlsx"`)
+        res.send(buffer)
+    } catch (error) {
+        console.error('Export products error:', error)
+        res.status(500).json({ error: error.message })
+    }
+}
+
 const getLocalDate = () => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -457,10 +525,239 @@ const createVariationProduct = async (client, businessId, group, results, catego
     results.created++
 }
 
+const findVariationBySkuOrBarcode = async (client, businessId, sku, barcode, seenInFile) => {
+    if (!sku && !barcode) return null
+
+    const parsedBarcode = barcode ? (parseBarcode(barcode) || barcode) : null
+
+    if (sku) {
+        const { data } = await client
+            .from('product_variations')
+            .select('*, product:product_id!inner(business_id, name, category_id, is_active)')
+            .eq('product.business_id', businessId)
+            .eq('sku', sku)
+            .maybeSingle()
+
+        if (data && !seenInFile.has(data.id)) {
+            seenInFile.add(data.id)
+            return data
+        }
+    }
+
+    if (parsedBarcode) {
+        const { data } = await client
+            .from('product_variations')
+            .select('*, product:product_id!inner(business_id, name, category_id, is_active)')
+            .eq('product.business_id', businessId)
+            .eq('barcode', parsedBarcode)
+            .maybeSingle()
+
+        if (data && !seenInFile.has(data.id)) {
+            seenInFile.add(data.id)
+            return data
+        }
+    }
+
+    return null
+}
+
+const resolveCategory = async (client, businessId, categoryName, categoryMap) => {
+    if (!categoryName) return null
+    const lowerName = categoryName.toLowerCase()
+    if (categoryMap[lowerName]) return categoryMap[lowerName]
+
+    const { data: newCat } = await client
+        .from('categories')
+        .insert({ business_id: businessId, name: categoryName })
+        .select('id')
+        .single()
+
+    if (newCat) {
+        categoryMap[lowerName] = newCat.id
+        return newCat.id
+    }
+    return null
+}
+
+const updateExistingVariation = async (client, businessId, variation, product, row, categoryMap, baseUnitMap) => {
+    const updateData = {}
+
+    if (row.price !== undefined) updateData.price = Number(row.price)
+    if (row.unit_cost !== undefined) updateData.unit_cost = Number(row.unit_cost) || 0
+    if (row.stock !== undefined) updateData.stock = Number(row.stock)
+    if (row.min_stock !== undefined) updateData.min_stock = Number(row.min_stock)
+    if (row.variation_name) updateData.variation_name = String(row.variation_name).trim()
+    if (row.sku) updateData.sku = String(row.sku).trim()
+    if (row.barcode) updateData.barcode = parseBarcode(String(row.barcode).trim())
+
+    if (row.unit_of_measure && String(row.unit_of_measure).trim() !== '') {
+        const str = String(row.unit_of_measure).trim()
+        const unitId = baseUnitMap[str] ?? baseUnitMap[str.toLowerCase()]
+        if (unitId) updateData.unit_of_measure_id = unitId
+    }
+
+    if (row.stock !== undefined && Number(row.stock) > 0) {
+        updateData.track_stock = true
+    }
+
+    if (Object.keys(updateData).length > 0) {
+        await client.from('product_variations').update(updateData).eq('id', variation.id)
+    }
+
+    const productUpdate = {}
+    const name = String(row.name || '').trim()
+    if (name && name !== product.name) {
+        productUpdate.name = name
+    }
+
+    const categoryName = row.category ? String(row.category).trim() : ''
+    if (categoryName) {
+        const catId = await resolveCategory(client, businessId, categoryName, categoryMap)
+        if (catId && catId !== product.category_id) {
+            productUpdate.category_id = catId
+        }
+    }
+
+    if (Object.keys(productUpdate).length > 0) {
+        await client.from('products').update(productUpdate).eq('id', product.id)
+    }
+
+    if (row.stock !== undefined && Number(row.stock) !== (variation.stock || 0)) {
+        const diff = Number(row.stock) - (variation.stock || 0)
+        if (diff !== 0) {
+            await client.from('inventory_movements').insert({
+                business_id: businessId,
+                product_id: product.id,
+                variation_id: variation.id,
+                type: diff > 0 ? 'entry' : 'exit',
+                quantity: Math.abs(diff),
+                unit_cost: Number(row.unit_cost) || 0,
+                notes: 'Ajuste por carga masiva',
+                created_at: getLocalDate(),
+            })
+        }
+    }
+}
+
+const addVariationToProduct = async (client, businessId, productId, row, baseUnitMap, sortOrder) => {
+    let unitOfMeasureId = 1
+    if (row.unit_of_measure && String(row.unit_of_measure).trim() !== '') {
+        const str = String(row.unit_of_measure).trim()
+        unitOfMeasureId = baseUnitMap[str] ?? baseUnitMap[str.toLowerCase()] ?? 1
+    }
+
+    const { data: newVar, error } = await client
+        .from('product_variations')
+        .insert({
+            product_id: productId,
+            business_id: businessId,
+            variation_name: String(row.variation_name || '').trim(),
+            price: Number(row.price) || 0,
+            unit_cost: Number(row.unit_cost) || 0,
+            sku: row.sku ? String(row.sku).trim() : null,
+            barcode: parseBarcode(row.barcode ? String(row.barcode).trim() : null),
+            stock: Number(row.stock) || 0,
+            min_stock: Number(row.min_stock) || 0,
+            track_stock: true,
+            sort_order: sortOrder || 1,
+            is_active: true,
+            unit_of_measure_id: unitOfMeasureId,
+        })
+        .select()
+        .single()
+
+    if (error) throw error
+
+    if (newVar.stock > 0) {
+        await client.from('inventory_movements').insert({
+            business_id: businessId,
+            product_id: productId,
+            variation_id: newVar.id,
+            type: 'entry',
+            quantity: newVar.stock,
+            unit_cost: Number(row.unit_cost) || 0,
+            notes: 'Carga masiva inicial',
+            created_at: getLocalDate(),
+        })
+    }
+
+    return newVar
+}
+
+const processSimpleUpdate = async (client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap, seenInFile) => {
+    const sku = row.sku ? String(row.sku).trim() : ''
+    const barcode = row.barcode ? String(row.barcode).trim() : ''
+
+    const existing = await findVariationBySkuOrBarcode(client, businessId, sku, barcode, seenInFile)
+
+    if (existing) {
+        await updateExistingVariation(client, businessId, existing, existing.product, row, categoryMap, baseUnitMap)
+        results.updated++
+        return
+    }
+
+    await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap)
+}
+
+const processVariationGroupUpdate = async (client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes, seenInFile) => {
+    const { name: productName, variationType, variations } = group
+
+    const { data: existingProduct } = await client
+        .from('products')
+        .select('id, name, category_id')
+        .eq('name', productName)
+        .eq('business_id', businessId)
+        .maybeSingle()
+
+    if (!existingProduct) {
+        await createVariationProduct(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes)
+        return
+    }
+
+    let categoryId = null
+    const firstVar = variations[0]
+    const categoryName = String(firstVar.category || '').trim()
+    if (categoryName) {
+        categoryId = await resolveCategory(client, businessId, categoryName, categoryMap)
+        if (categoryId && categoryId !== existingProduct.category_id) {
+            await client.from('products').update({ category_id: categoryId }).eq('id', existingProduct.id)
+        }
+    }
+
+    let sortOrder = 1
+    const { data: maxSort } = await client
+        .from('product_variations')
+        .select('sort_order')
+        .eq('product_id', existingProduct.id)
+        .neq('variation_name', 'Default')
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+    if (maxSort) sortOrder = maxSort.sort_order + 1
+
+    for (const v of variations) {
+        const sku = v.sku ? String(v.sku).trim() : ''
+        const barcode = v.barcode ? String(v.barcode).trim() : ''
+
+        const existingVar = await findVariationBySkuOrBarcode(client, businessId, sku, barcode, seenInFile)
+
+        if (existingVar) {
+            await updateExistingVariation(client, businessId, existingVar, existingVar.product, v, categoryMap, baseUnitMap)
+            results.updated++
+        } else {
+            await addVariationToProduct(client, businessId, existingProduct.id, v, baseUnitMap, sortOrder)
+            results.created++
+            sortOrder++
+        }
+    }
+}
+
 export const bulkCreateProducts = async (req, res) => {
     try {
         const client = getClient(req)
         const businessId = req.body.business_id
+        const mode = req.body.mode || 'create'
 
         if (!req.file) {
             return res.status(400).json({ error: 'No se ha subido ningún archivo' })
@@ -497,12 +794,15 @@ export const bulkCreateProducts = async (req, res) => {
 
         const seenSkus = new Set()
         const seenBarcodes = new Set()
-        const results = { created: 0, errors: [], total: rows.length, autoSkusCreated: 0 }
+        const seenInFile = new Set()
+        const results = { created: 0, updated: 0, errors: [], total: rows.length, autoSkusCreated: 0 }
         const variationGroups = {}
         let processedCount = 0
 
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
         res.write(JSON.stringify({ type: 'total', total: rows.length }) + '\n')
+
+        const isUpdate = mode === 'update'
 
         for (let i = 0; i < rows.length; i++) {
             const row = normalizeRow(rows[i])
@@ -532,14 +832,22 @@ export const bulkCreateProducts = async (req, res) => {
                 }
                 variationGroups[key].variations.push({ ...row, variation_name: variationName })
             } else {
-                await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap)
+                if (isUpdate) {
+                    await processSimpleUpdate(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap, seenInFile)
+                } else {
+                    await createSimpleProduct(client, businessId, row, results, categoryMap, seenSkus, seenBarcodes, rowNum, baseUnitMap)
+                }
                 processedCount++
                 res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
             }
         }
 
         for (const [, group] of Object.entries(variationGroups)) {
-            await createVariationProduct(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes)
+            if (isUpdate) {
+                await processVariationGroupUpdate(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes, seenInFile)
+            } else {
+                await createVariationProduct(client, businessId, group, results, categoryMap, baseUnitMap, seenSkus, seenBarcodes)
+            }
             processedCount += group.variations.length
             res.write(JSON.stringify({ type: 'progress', current: processedCount, total: rows.length }) + '\n')
         }
