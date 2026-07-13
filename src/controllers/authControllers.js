@@ -30,7 +30,7 @@ export const login = async (req, res) => {
         const businessQuery = profileData.role !== 'admin' ? serviceRoleSupabase : supabase
         const { data: businessData, error: businessError } = await businessQuery
             .from('businesses')
-            .select('business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications, user_id')
+            .select('business_name, business_logo, owner_name, email, phone, ticket_footer, low_stock_notifications, user_id, variable_units_enabled')
             .eq('user_id', businessId)
             .single()
 
