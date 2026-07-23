@@ -157,7 +157,7 @@ export const getReports = async (req, res) => {
 
             const { data: salesItemsData, error: itemsErr } = await client
                 .from('salesItems')
-                .select('product_id, variation_id, variation_name, unit_cost, quantity, subtotal, products(name, variation_type), product_variations(unit_of_measure_id)')
+                .select('product_id, variation_id, variation_name, unit_cost, quantity, subtotal, products(name, variation_type, categories(name)), product_variations(unit_of_measure_id)')
                 .in('sale_id', saleIds)
 
             if (itemsErr) throw itemsErr
@@ -172,6 +172,8 @@ export const getReports = async (req, res) => {
                         variation_id: item.variation_id,
                         variation_name: item.variation_name,
                         variation_type: item.products?.variation_type,
+                        category_id: item.products?.categories?.id,
+                        category_name: item.products?.categories?.name,
                         unit_of_measure_id: item.product_variations?.unit_of_measure_id,
                         totalQuantity: 0,
                         totalRevenue: 0,
@@ -200,6 +202,8 @@ export const getReports = async (req, res) => {
                     variation_id: p.variation_id,
                     variation_name: p.variation_name,
                     variation_type: p.variation_type,
+                    category_id: p.category_id,
+                    category_name: p.category_name,
                     unit_of_measure_id: p.unit_of_measure_id,
                     totalQuantity: p.totalQuantity,
                     totalRevenue: p.totalRevenue,
@@ -235,7 +239,7 @@ export const getReports = async (req, res) => {
 
             let query = client
                 .from('inventory_movements')
-                .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
+                .select('*, products(name, variation_type, category_id), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
                 .eq('business_id', businessId)
 
             if (type) query = query.eq('type', type)
@@ -461,6 +465,8 @@ export const getReports = async (req, res) => {
                         product_id: p.id,
                         product_name: p.name,
                         variation_type: p.variation_type,
+                        category_id: p.categories?.id,
+                        category_name: p.categories?.name,
                         sku: pv.sku,
                         barcode: pv.barcode,
                         current_stock: stock,
@@ -595,7 +601,7 @@ export const getReports = async (req, res) => {
             if (returnData) {
                 const { data: itemsData, error: itemsError } = await client
                     .from('returns_items')
-                    .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
+                .select('*, products(name, variation_type), product_variations(variation_name, sku, barcode, unit_of_measure_id)')
                     .eq('return_id', returnData.id)
                 if (itemsError) throw itemsError
                 items = itemsData || []
